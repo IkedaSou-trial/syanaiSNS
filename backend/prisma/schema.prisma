@@ -1,0 +1,116 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+// ユーザーモデル
+// データベース上のテーブル名は "users" になります
+model User {
+  id                String   @id @default(uuid()) // UUIDを主キーとして使用
+  createdAt         DateTime @default(now())      @map("created_at") // 作成日時
+  updatedAt         DateTime @updatedAt           @map("updated_at") // 更新日時
+
+  username          String   @unique              // ログインID（ユニーク）
+  displayName       String                        @map("display_name") // 画面表示名
+  password          String                        // ハッシュ化されたパスワード
+  storeCode         String                        @map("store_code")   // 所属店舗コード
+  profileImageUrl   String?                       @map("profile_image_url") // プロフィール画像のURL (オプショナル)
+
+  // リレーション
+  posts             Post[]                        // このユーザーが作成した投稿
+  comments          Comment[]                     // このユーザーが作成したコメント
+
+  // 💡 User がどの「いいね」をしたか
+  likes     Like[]
+
+  followedBy      Follow[] @relation("followedBy")  // 自分をフォローしている人 (フォロワー)
+  following       Follow[] @relation("following")   // 自分がフォローしている人 (フォロー中)
+
+  @@map("users") // データベース上のテーブル名を明示的に "users" に設定
+}
+
+// 投稿モデル
+// データベース上のテーブル名は "posts" になります
+model Post {
+  id        String   @id @default(uuid()) // UUIDを主キーとして使用
+  createdAt DateTime @default(now())      @map("created_at") // 作成日時
+  updatedAt DateTime @updatedAt           @map("updated_at") // 更新日時
+
+  title     String?                       // 投稿タイトル (オプショナル)
+  content   String                        // 投稿本文
+
+  // リレーション
+  authorId  String                        @map("author_id") // 投稿したユーザーのID
+  author    User     @relation(fields: [authorId], references: [id]) // 投稿者へのリレーション
+  imageUrl    String?
+
+  comments  Comment[]                     // この投稿に付けられたコメント
+
+  // 💡 post がどの「いいね」をしたか
+  likes     Like[]
+  
+
+  @@map("posts") // データベース上のテーブル名を明示的に "posts" に設定
+}
+
+// コメントモデル
+// データベース上のテーブル名は "comments" になります
+model Comment {
+  id        String   @id @default(uuid()) // UUIDを主キーとして使用
+  createdAt DateTime @default(now())      @map("created_at") // 作成日時
+  updatedAt DateTime @updatedAt           @map("updated_at") // 更新日時
+
+  content   String                        // コメント本文
+
+  // リレーション (誰がどの投稿にコメントしたか)
+  authorId  String                        @map("author_id") // コメントしたユーザーのID
+  author    User     @relation(fields: [authorId], references: [id]) // コメント投稿者へのリレーション
+
+  postId    String                        @map("post_id")   // コメント先の投稿ID
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@map("comments") // データベース上のテーブル名を明示的に "comments" に設定
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // リレーション (誰がどの投稿にいいねしたか)
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+
+  postId    String   @map("post_id")
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  // 💡 同じユーザーが同じ投稿に1回しか「いいね」できないように、
+  // ユーザーIDと投稿IDの組み合わせをユニーク（一意）にします
+  @@unique([userId, postId])
+  @@map("likes")
+}
+
+// 💡 フォローモデルを追加
+model Follow {
+  followerId  String
+  follower    User   @relation("following", fields: [followerId], references: [id])
+
+  followingId String
+  following   User   @relation("followedBy", fields: [followingId], references: [id])
+
+  createdAt   DateTime @default(now())
+
+  // 複合主キー: 同じペアのフォローは1回だけ
+  @@id([followerId, followingId])
+  @@map("follows")
+}

@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    /* 基本設定 */
+    "target": "es2020",                  /* JSの出力ターゲットバージョン */
+    "module": "commonjs",                /* モジュールのシステム */
+    "rootDir": "./",                     /* ソースファイルのルートディレクトリ */
+    "outDir": "./dist",                  /* コンパイルされたJSファイルの出力先 */
+    "esModuleInterop": true,             /* ESモジュールとCommonJSモジュールの互換性を確保 */
+    "forceConsistentCasingInFileNames": true, 
+    "strict": true,                      /* すべての厳格な型チェックオプションを有効化 */
+    "skipLibCheck": true,                /* 宣言ファイル（ライブラリ）の型チェックをスキップ */
+    
+    /* Node.js 環境の型定義を有効化 */
+    "types": ["node"],                   /* 💡 ここで 'node' のグローバル型定義を明示的に読み込みます */
+  },
+  "include": ["server.ts", "src/**/*.ts"] /* コンパイル対象のファイル指定 */
+}
