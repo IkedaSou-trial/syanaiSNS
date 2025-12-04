@@ -8,18 +8,24 @@ class ApiService {
   // プラットフォーム（OS）に応じてベースURLを自動で切り替えます
 
   String get _baseUrl {
-    // 例: "http://192.168.1.15:3000" (最後の :3000 はポート番号なので残す)
-    const String ngrokUrl =
-        "https://unferreted-campbell-hypermetaphorical.ngrok-free.dev"; // <-- ここにあなたの PCのIPアドレス または ngrok URL を入れてください
-    if (Platform.isAndroid) {
-      //return pcIpAddress;
-      return "http://10.0.2.2:3000"; // Androidエミュレータ
-    } else if (Platform.isIOS) {
-      return ngrokUrl.trim(); // iOSシミュレータ
-      //return "http://localhost:3000"; // iOSシミュレータ（実機の場合はPCのIPアドレスに変更する必要あり）
-    } else {
-      return "http://localhost:3000"; // Webやデスクトップなど
-    }
+    // 👇 Renderで発行されたURLをここに貼る (末尾の / は無し)
+    const String productionUrl = "https://syanaisns.onrender.com";
+
+    // 実機でもエミュレータでも、常に本番サーバーを使う
+    return productionUrl;
+
+    // // 例: "http://192.168.1.15:3000" (最後の :3000 はポート番号なので残す)
+    // const String ngrokUrl =
+    //     "https://unferreted-campbell-hypermetaphorical.ngrok-free.dev"; // <-- ここにあなたの PCのIPアドレス または ngrok URL を入れてください
+    // if (Platform.isAndroid) {
+    //   //return pcIpAddress;
+    //   return "http://10.0.2.2:3000"; // Androidエミュレータ
+    // } else if (Platform.isIOS) {
+    //   return ngrokUrl.trim(); // iOSシミュレータ
+    //   //return "http://localhost:3000"; // iOSシミュレータ（実機の場合はPCのIPアドレスに変更する必要あり）
+    // } else {
+    //   return "http://localhost:3000"; // Webやデスクトップなど
+    // }
   }
 
   String get baseUrl => _baseUrl;
