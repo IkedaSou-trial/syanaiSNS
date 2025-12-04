@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:like_button/like_button.dart'; // 💡 追加
 import '../services/api_service.dart';
 import 'dart:convert';
 import '../utils/date_formatter.dart';
@@ -15,7 +16,7 @@ class _HomeScreenState extends State<HomeScreen>
   final ApiService _apiService = ApiService();
 
   List<dynamic> _posts = [];
-  List<dynamic> _followingPosts = []; // フォロー中用リスト
+  List<dynamic> _followingPosts = [];
   bool _isLoading = true;
 
   late TabController _tabController;
@@ -28,13 +29,11 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _refreshPosts() async {
-    setState(() {
-      _isLoading = true;
-    });
-
+    // 引っ張って更新の時はローディングを出さない方が自然ですが、
+    // 初回ロード時は出すように制御しても良いです。今回は簡易的にそのまま。
     final results = await Future.wait([
-      _apiService.getPosts(), // すべて
-      _apiService.getPosts(onlyFollowing: true), // フォロー中のみ
+      _apiService.getPosts(),
+      _apiService.getPosts(onlyFollowing: true),
     ]);
 
     if (mounted) {
@@ -46,37 +45,8 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  // 「いいね」ボタンを押したときの処理
-  Future<void> _toggleLike(String postId, bool isCurrentlyLiked) async {
-    bool success;
-    if (isCurrentlyLiked) {
-      success = await _apiService.unlikePost(postId);
-    } else {
-      success = await _apiService.likePost(postId);
-    }
-
-    if (success && mounted) {
-      setState(() {
-        // 💡 修正: 両方のリストから該当の投稿を探して更新する (同期させるため)
-        void updateList(List<dynamic> list) {
-          final index = list.indexWhere((p) => p['id'] == postId);
-          if (index != -1) {
-            final post = list[index];
-            post['isLikedByMe'] = !isCurrentlyLiked;
-            post['likeCount'] =
-                (post['likeCount'] ?? 0) + (isCurrentlyLiked ? -1 : 1);
-          }
-        }
-
-        updateList(_posts);
-        updateList(_followingPosts);
-      });
-    }
-  }
-
-  // 投稿削除処理
+  // 💡 投稿削除処理
   Future<void> _deletePostProcess(String postId) async {
-    // 確認ダイアログを表示
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -100,7 +70,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (shouldDelete == true) {
       final success = await _apiService.deletePost(postId);
       if (success) {
-        _refreshPosts(); // 一覧を更新
+        _refreshPosts();
         if (mounted) {
           ScaffoldMessenger.of(
             context,
@@ -123,8 +93,10 @@ class _HomeScreenState extends State<HomeScreen>
     return NetworkImage(url);
   }
 
-  // 💡 共通のリスト表示ウィジェット (ここが重要)
   Widget _buildPostList(List<dynamic> targetPosts) {
+    if (_isLoading && targetPosts.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
     if (targetPosts.isEmpty) {
       return const Center(child: Text('投稿はありません'));
     }
@@ -137,38 +109,50 @@ class _HomeScreenState extends State<HomeScreen>
           final post = targetPosts[index];
           final author = post['author'];
 
-          final likeCount = post['likeCount'] ?? 0;
-          final isLikedByMe = post['isLikedByMe'] ?? false;
-          final commentCount = post['commentCount'] ?? 0;
-          final isMine = post['isMine'] ?? false;
+          final int likeCount = post['likeCount'] ?? 0;
+          final bool isLikedByMe = post['isLikedByMe'] ?? false;
+          final int commentCount = post['commentCount'] ?? 0;
+          final bool isMine = post['isMine'] ?? false;
 
           return InkWell(
             onTap: () {
               Navigator.of(context).pushNamed('/post_detail', arguments: post);
             },
             child: Card(
-              margin: const EdgeInsets.all(8.0),
+              margin: const EdgeInsets.symmetric(
+                horizontal: 8.0,
+                vertical: 6.0,
+              ),
+              elevation: 2, // 💡 少し影をつけてリッチに
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12), // 💡 角丸を少し大きく
+              ),
               child: Padding(
                 padding: const EdgeInsets.all(12.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ヘッダー (アイコン・名前・日付・削除)
+                    // ヘッダー
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Row(
                           children: [
                             CircleAvatar(
-                              radius: 16,
+                              radius: 18,
                               backgroundImage: _getImageProvider(
                                 author?['profileImageUrl'],
                               ),
+                              backgroundColor: Colors.grey[200],
                               child: author?['profileImageUrl'] == null
-                                  ? const Icon(Icons.person, size: 16)
+                                  ? const Icon(
+                                      Icons.person,
+                                      size: 20,
+                                      color: Colors.grey,
+                                    )
                                   : null,
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 10),
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -186,8 +170,7 @@ class _HomeScreenState extends State<HomeScreen>
                                     author?['displayName'] ?? '不明なユーザー',
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                      color: Colors.blue,
+                                      fontSize: 15,
                                     ),
                                   ),
                                 ),
@@ -205,9 +188,8 @@ class _HomeScreenState extends State<HomeScreen>
                         if (isMine)
                           IconButton(
                             icon: const Icon(
-                              Icons.delete,
+                              Icons.more_horiz, // 💡 メニューっぽいアイコンに変更
                               color: Colors.grey,
-                              size: 20,
                             ),
                             onPressed: () => _deletePostProcess(post['id']),
                           ),
@@ -216,45 +198,85 @@ class _HomeScreenState extends State<HomeScreen>
                     const SizedBox(height: 8),
 
                     // 本文
-                    Text(post['content'] ?? ''),
+                    Text(
+                      post['content'] ?? '',
+                      style: const TextStyle(fontSize: 15, height: 1.4),
+                    ),
 
                     // 画像
                     if (post['imageUrl'] != null) ...[
-                      const SizedBox(height: 8),
-                      Image(
-                        image: _getImageProvider(post['imageUrl'])!,
-                        fit: BoxFit.cover,
-                        height: 200,
-                        width: double.infinity,
+                      const SizedBox(height: 12),
+                      Hero(
+                        tag: post['id'],
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image(
+                            image: _getImageProvider(post['imageUrl'])!,
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            // 高さを固定せず、アスペクト比で表示するとより現代的ですが、今回は固定で
+                            height: 250,
+                          ),
+                        ),
                       ),
                     ],
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 12),
 
-                    // アクションボタン
+                    // アクションボタンエリア
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        const Icon(
-                          Icons.chat_bubble_outline,
-                          size: 20,
-                          color: Colors.grey,
+                        // 💡 いいねボタン (アニメーション付き)
+                        LikeButton(
+                          size: 24,
+                          isLiked: isLikedByMe,
+                          likeCount: likeCount,
+                          countBuilder:
+                              (int? count, bool isLiked, String text) {
+                                return Text(
+                                  text,
+                                  style: TextStyle(
+                                    color: isLiked ? Colors.red : Colors.grey,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                );
+                              },
+                          // サーバーへのリクエスト処理
+                          onTap: (bool isLiked) async {
+                            bool success;
+                            if (isLiked) {
+                              success = await _apiService.unlikePost(
+                                post['id'],
+                              );
+                            } else {
+                              success = await _apiService.likePost(post['id']);
+                            }
+                            // API通信が成功したら、新しい状態(!isLiked)を返す
+                            return success ? !isLiked : isLiked;
+                          },
                         ),
-                        const SizedBox(width: 4),
-                        Text('$commentCount'),
-                        const SizedBox(width: 16),
-                        IconButton(
-                          icon: Icon(
-                            isLikedByMe
-                                ? Icons.favorite
-                                : Icons.favorite_border,
-                            color: isLikedByMe ? Colors.red : Colors.grey,
-                          ),
-                          onPressed: () => _toggleLike(post['id'], isLikedByMe),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
+
+                        const SizedBox(width: 24),
+
+                        // コメントアイコン
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.chat_bubble_outline,
+                              size: 22,
+                              color: Colors.grey,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '$commentCount',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 4),
-                        Text('$likeCount'),
                       ],
                     ),
                   ],
@@ -270,32 +292,38 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey[50], // 💡 背景を少しグレーにしてカードを目立たせる
       appBar: AppBar(
-        title: const Text('ホーム'),
+        title: const Text(
+          'タイムライン',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        centerTitle: false, // 左寄せでSNSっぽく
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
         bottom: TabBar(
           controller: _tabController,
+          labelColor: Colors.blue[800],
+          unselectedLabelColor: Colors.grey,
+          indicatorColor: Colors.blue[800],
           tabs: const [
-            Tab(text: 'すべての投稿'),
+            Tab(text: 'おすすめ'),
             Tab(text: 'フォロー中'),
           ],
         ),
       ),
-      // 💡 TabBarView を使って2つのリストを切り替える
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                _buildPostList(_posts), // 1ページ目
-                _buildPostList(_followingPosts), // 2ページ目
-              ],
-            ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [_buildPostList(_posts), _buildPostList(_followingPosts)],
+      ),
       floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.blue[800],
         onPressed: () async {
           final result = await Navigator.of(context).pushNamed('/create_post');
           if (result == true) _refreshPosts();
         },
-        child: const Icon(Icons.add),
+        child: const Icon(Icons.edit, color: Colors.white), // 💡 ペンアイコンに変更
       ),
     );
   }

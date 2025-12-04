@@ -78,191 +78,201 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final author = _post['author'] ?? {};
 
     return Scaffold(
-      appBar: AppBar(title: Text(author['displayName'] ?? '投稿詳細')),
+      appBar: AppBar(title: Text(author['displayName'] ?? '投稿')),
       body: Column(
         children: [
-          // --- 1. 投稿内容 (スクロール可能にするためにExpandedに入れるか、ここは固定するか) ---
-          // 今回はコメントリストと一緒にスクロールさせるのではなく、
-          // 「投稿部分」は上に固定し、「コメント部分」だけスクロールするUIにします
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 20,
-                      backgroundImage: _getImageProvider(
-                        _post['author']['profileImageUrl'],
-                      ),
-                      child: _post['author']['profileImageUrl'] == null
-                          ? const Icon(Icons.person)
-                          : null,
-                    ),
-                    const SizedBox(width: 10),
-                    Column(
+          // --- 1. 投稿内容エリア（ここをExpandedで囲んでスクロール可能にする） ---
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          _post['author']['displayName'] ?? '不明なユーザー',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 18,
+                              backgroundImage: _getImageProvider(
+                                _post['author']['profileImageUrl'],
+                              ),
+                              child: _post['author']['profileImageUrl'] == null
+                                  ? const Icon(Icons.person, size: 18)
+                                  : null,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _post['author']['displayName'] ?? '不明なユーザー',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              DateFormatter.timeAgo(_post['createdAt']),
+                              style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
                         ),
+                        const SizedBox(height: 10),
                         Text(
-                          DateFormatter.timeAgo(_post['createdAt']),
-                          style: const TextStyle(
-                            color: Colors.grey,
-                            fontSize: 12,
-                          ),
+                          _post['content'] ?? '',
+                          style: const TextStyle(fontSize: 16),
                         ),
                       ],
                     ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  _post['content'] ?? '',
-                  style: const TextStyle(fontSize: 16),
-                ),
-                if (_post['imageUrl'] != null) ...[
-                  const SizedBox(height: 10),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image(
-                      image: _getImageProvider(_post['imageUrl'])!,
-                      fit: BoxFit.cover,
-                      height: 200,
-                      width: double.infinity,
-                    ),
                   ),
-                ],
-              ],
-            ),
-          ),
-          const Divider(thickness: 1, height: 1),
 
-          // --- 2. コメント一覧 ---
-          Expanded(
-            child: FutureBuilder<List<dynamic>>(
-              future: _commentsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      'コメントはまだありません。\n一番乗りでコメントしよう！',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey),
+                  // 💡 投稿画像があれば表示
+                  if (_post['imageUrl'] != null) ...[
+                    // SizedBox(height: 10) は削除して、画像と本文を少し近づけるか、パディングで調整
+                    Hero(
+                      tag: _post['id'],
+                      child: Image(
+                        image: _getImageProvider(_post['imageUrl'])!,
+                        // ▼▼▼ 修正ポイント ▼▼▼
+                        fit: BoxFit.fitWidth, // 横幅に合わせて高さを自動調整（全体表示）
+                        width: double.infinity, // 横幅はいっぱいに
+                        // height: 250, // ❌ 高さは指定しない（削除）
+                      ),
                     ),
-                  );
-                }
+                  ],
 
-                final comments = snapshot.data!;
-                return ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 20),
-                  itemCount: comments.length,
-                  itemBuilder: (context, index) {
-                    final comment = comments[index];
-                    final commentAuthor = comment['author'] ?? {};
-                    // バックエンドから返ってきた isMine フラグを使用
-                    final isMyComment = comment['isMine'] ?? false;
+                  const Divider(),
 
-                    return ListTile(
-                      leading: CircleAvatar(
-                        radius: 16,
-                        backgroundImage: _getImageProvider(
-                          commentAuthor['profileImageUrl'],
-                        ),
-                        child: commentAuthor['profileImageUrl'] == null
-                            ? const Icon(Icons.person, size: 16)
-                            : null,
-                      ),
-                      title: Row(
-                        children: [
-                          Text(
-                            commentAuthor['displayName'] ?? '不明',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            DateFormatter.timeAgo(comment['createdAt']),
-                            style: const TextStyle(
-                              color: Colors.grey,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                      subtitle: Text(comment['content'] ?? ''),
-                      trailing: isMyComment
-                          ? IconButton(
-                              icon: const Icon(
-                                Icons.delete_outline,
-                                color: Colors.grey,
+                  // --- 2. コメント一覧 ---
+                  // SingleChildScrollViewの中にFutureBuilderを入れる形に変更
+                  FutureBuilder<List<dynamic>>(
+                    future: _commentsFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Padding(
+                          padding: EdgeInsets.all(20.0),
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+                      if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                        return const Padding(
+                          padding: EdgeInsets.all(20.0),
+                          child: Center(child: Text('まだコメントはありません')),
+                        );
+                      }
+
+                      final comments = snapshot.data!;
+                      // ListView.builderを使うとスクロールが競合するので、Column + map に展開するか
+                      // shrinkWrap: true, physics: NeverScrollableScrollPhysics を使う
+                      return ListView.builder(
+                        shrinkWrap: true, // コンテンツの高さに合わせる
+                        physics:
+                            const NeverScrollableScrollPhysics(), // 親のスクロールに任せる
+                        itemCount: comments.length,
+                        itemBuilder: (context, index) {
+                          final comment = comments[index];
+                          final commentAuthor = comment['author'] ?? {};
+                          final isMyComment = comment['isMine'] ?? false;
+
+                          return ListTile(
+                            leading: CircleAvatar(
+                              radius: 16,
+                              backgroundImage: _getImageProvider(
+                                commentAuthor['profileImageUrl'],
                               ),
-                              onPressed: () async {
-                                final shouldDelete = await showDialog<bool>(
-                                  context: context,
-                                  builder: (context) {
-                                    return AlertDialog(
-                                      title: const Text('削除確認'),
-                                      content: const Text('このコメントを削除しますか？'),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.of(context).pop(false),
-                                          child: const Text('キャンセル'),
-                                        ),
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.of(context).pop(true),
-                                          child: const Text(
-                                            '削除',
-                                            style: TextStyle(color: Colors.red),
-                                          ),
-                                        ),
-                                      ],
-                                    );
-                                  },
-                                );
+                              child: commentAuthor['profileImageUrl'] == null
+                                  ? const Icon(Icons.person, size: 16)
+                                  : null,
+                            ),
+                            title: Text(
+                              commentAuthor['displayName'] ?? '不明',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Text(comment['content'] ?? ''),
+                            trailing: isMyComment
+                                ? IconButton(
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      size: 20,
+                                      color: Colors.grey,
+                                    ),
+                                    onPressed: () async {
+                                      final shouldDelete =
+                                          await showDialog<bool>(
+                                            context: context,
+                                            builder: (context) {
+                                              return AlertDialog(
+                                                title: const Text('削除の確認'),
+                                                content: const Text(
+                                                  'このコメントを削除しますか？',
+                                                ),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.of(
+                                                          context,
+                                                        ).pop(false),
+                                                    child: const Text('キャンセル'),
+                                                  ),
+                                                  TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.of(
+                                                          context,
+                                                        ).pop(true),
+                                                    child: const Text(
+                                                      '削除',
+                                                      style: TextStyle(
+                                                        color: Colors.red,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              );
+                                            },
+                                          );
 
-                                if (shouldDelete == true) {
-                                  final success = await _apiService
-                                      .deleteComment(_postId, comment['id']);
-                                  if (success) {
-                                    _refreshComments();
-                                    if (mounted) {
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('コメントを削除しました'),
-                                        ),
-                                      );
-                                    }
-                                  }
-                                }
-                              },
-                            )
-                          : null,
-                    );
-                  },
-                );
-              },
+                                      if (shouldDelete == true) {
+                                        final success = await _apiService
+                                            .deleteComment(
+                                              _postId,
+                                              comment['id'],
+                                            );
+                                        if (success) {
+                                          _refreshComments();
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text('コメントを削除しました'),
+                                              ),
+                                            );
+                                          }
+                                        }
+                                      }
+                                    },
+                                  )
+                                : null,
+                          );
+                        },
+                      );
+                    },
+                  ),
+                  // 下部の入力欄とかぶらないように余白を追加
+                  const SizedBox(height: 80),
+                ],
+              ),
             ),
           ),
 
-          // --- 3. コメント入力エリア ---
+          // --- 3. コメント入力欄 (画面下部に固定) ---
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
             decoration: BoxDecoration(
               color: Colors.white,
               boxShadow: [
@@ -274,14 +284,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 ),
               ],
             ),
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
             child: SafeArea(
+              // iPhoneのホームバー対策
               child: Row(
                 children: [
                   Expanded(
                     child: TextField(
                       controller: _commentController,
                       decoration: InputDecoration(
-                        hintText: 'コメントを入力...',
+                        hintText: 'コメントを追加...',
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 10,

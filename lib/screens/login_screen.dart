@@ -23,10 +23,24 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleLogin(String barcode) async {
     String employeeId = barcode;
 
-    // "2000"から始まる13桁のコードの場合、真ん中の8桁を取り出す
-    if (barcode.length == 13 && barcode.startsWith('2000')) {
-      employeeId = barcode.substring(4, 12);
-      print('社員番号抽出: $barcode -> $employeeId');
+    // JANコード(13桁) かつ "2" で始まる場合 (インストアコード)
+    if (barcode.length == 13 && barcode.startsWith('2')) {
+      try {
+        // 1. 先頭1文字(2)と末尾1文字(チェックデジット)を除去して、真ん中の11文字を取得
+        // substring(1, 12) は インデックス1(2文字目) から インデックス11(12文字目) までを取得
+        String corePart = barcode.substring(1, 12);
+
+        // 2. 一度「整数(int)」に変換することで、先頭の連続するゼロを取り除く
+        int idNumber = int.parse(corePart);
+
+        // 3. 再び文字列に戻す
+        employeeId = idNumber.toString();
+
+        print('社員番号抽出[汎用]: $barcode -> $corePart -> $employeeId');
+      } catch (e) {
+        print('バーコード解析エラー: $e');
+        // 解析に失敗した場合は、変換せずにそのままの値を試す
+      }
     }
 
     setState(() {

@@ -1,6 +1,7 @@
 import * as express from 'express';
 import prisma from '../lib/prisma';
 import { authenticateJWT, AuthRequest, authenticateJWT_Optional } from '../auth/auth.middleware';
+import cloudinary from '../lib/cloudinary'; // 💡 追加: 画像アップロード用
 
 const userRouter = express.Router();
 
@@ -25,8 +26,8 @@ userRouter.get('/:username', authenticateJWT_Optional, async (req: AuthRequest, 
         _count: {
           select: { 
             posts: true,
-            followedBy: true, // フォロワー数
-            following: true,  // フォロー中数
+            followedBy: true,
+            following: true,
           },
         },
       },
@@ -61,7 +62,7 @@ userRouter.get('/:username', authenticateJWT_Optional, async (req: AuthRequest, 
             id: true,
             displayName: true,
             profileImageUrl: true,
-            username: true, // usernameも取得
+            username: true,
             storeCode: true,
           },
         },
@@ -101,7 +102,7 @@ userRouter.get('/:username', authenticateJWT_Optional, async (req: AuthRequest, 
 
 /**
  * GET /users/:username/following
- * 💡 追加: 指定したユーザーがフォローしているユーザー一覧を取得
+ * 指定したユーザーがフォローしているユーザー一覧を取得
  */
 userRouter.get('/:username/following', authenticateJWT_Optional, async (req: AuthRequest, res) => {
   const { username } = req.params;
@@ -138,7 +139,7 @@ userRouter.get('/:username/following', authenticateJWT_Optional, async (req: Aut
 
 /**
  * PUT /users/me
- * 自分のプロフィール情報を更新
+ * 自分のプロフィール情報を更新 (Cloudinary対応版)
  */
 userRouter.put('/me', authenticateJWT, async (req: AuthRequest, res) => {
   const userId = req.user?.id;
@@ -147,11 +148,32 @@ userRouter.put('/me', authenticateJWT, async (req: AuthRequest, res) => {
   if (!userId) return res.status(403).json({ error: '認証が必要です' });
 
   try {
+    let profileImageUrl: string | undefined;
+
+    // 💡 修正: 画像データ(Base64)がある場合、Cloudinaryにアップロードする
+    if (profileImageBase64 && profileImageBase64.startsWith('data:image')) {
+      try {
+        const uploadResponse = await cloudinary.uploader.upload(profileImageBase64, {
+          folder: 'shainai_sns_profiles', // Cloudinary上のフォルダ名
+          transformation: [
+            { width: 400, height: 400, crop: 'fill' } // 正方形に自動トリミング
+          ],
+        });
+        // アップロード後のURLを取得
+        profileImageUrl = uploadResponse.secure_url;
+      } catch (uploadError) {
+        console.error('Cloudinary upload error:', uploadError);
+        return res.status(500).json({ error: '画像のアップロードに失敗しました' });
+      }
+    }
+
+    // データベースを更新
     const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: {
         displayName: displayName,
-        profileImageUrl: profileImageBase64 || undefined,
+        // 新しい画像URLがあれば更新、なければ何もしない(undefined)
+        profileImageUrl: profileImageUrl, 
         storeCode: storeCode || undefined,
       },
       select: {
@@ -169,5 +191,4 @@ userRouter.put('/me', authenticateJWT, async (req: AuthRequest, res) => {
   }
 });
 
-// 💡 必ず最後に export すること！
 export default userRouter;

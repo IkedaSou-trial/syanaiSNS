@@ -9,7 +9,8 @@ class ApiService {
 
   String get _baseUrl {
     // 👇 Renderで発行されたURLをここに貼る (末尾の / は無し)
-    const String productionUrl = "https://syanaisns.onrender.com";
+    const String productionUrl =
+        "https://unferreted-campbell-hypermetaphorical.ngrok-free.dev";
 
     // 実機でもエミュレータでも、常に本番サーバーを使う
     return productionUrl;

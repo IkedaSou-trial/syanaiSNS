@@ -16,10 +16,15 @@ const storage = new CloudinaryStorage({
     return {
       folder: 'shainai_sns_posts', // Cloudinary上のフォルダ名
       allowed_formats: ['jpg', 'png', 'jpeg', 'heic'], // 許可する形式
-      // 💡 ここで画像をリサイズ・圧縮して「軽く」します
+      // 画像をリサイズ・圧縮設定
       transformation: [{ width: 1000, crop: 'limit', quality: 'auto' }],
     };
   },
 });
 
+// アップロード用のミドルウェア (post.controller.tsで使用)
 export const upload = multer({ storage: storage });
+
+// ▼▼▼ これを追加してください！ ▼▼▼
+// Cloudinary本体をエクスポート (user.controller.tsで使用)
+export default cloudinary;
