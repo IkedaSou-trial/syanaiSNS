@@ -7,7 +7,7 @@ import '../services/api_service.dart';
 class EditProfileScreen extends StatefulWidget {
   final String currentDisplayName;
   final String? currentImageUrl;
-  final String currentStoreCode; // 必須: 現在の店舗コード
+  final String currentStoreCode; // 現在の店舗コード
 
   const EditProfileScreen({
     super.key,
@@ -28,24 +28,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   File? _imageFile;
   bool _isLoading = false;
 
-  // 店舗コードの選択肢リスト
-  final List<String> _storeCodes = ['A101', 'A102', 'B201', 'B202', 'C301'];
-
-  // 選択された店舗コードを保持する変数
-  late String _selectedStoreCode;
+  // 💡 削除: 店舗コードの選択機能は不要になったため変数を削除
 
   @override
   void initState() {
     super.initState();
     _nameController.text = widget.currentDisplayName;
-
-    // 店舗コードの初期値をセット
-    // (もしリストに含まれていないコードが渡された場合は、リストの先頭をデフォルトにする安全策)
-    if (_storeCodes.contains(widget.currentStoreCode)) {
-      _selectedStoreCode = widget.currentStoreCode;
-    } else {
-      _selectedStoreCode = _storeCodes.first;
-    }
   }
 
   // 画像を選択する処理
@@ -81,7 +69,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final success = await _apiService.updateProfile(
       _nameController.text,
       base64Image,
-      _selectedStoreCode, // 選択された店舗コードを送信
+      widget.currentStoreCode, // 💡 修正: 変更せず、元のコードをそのまま送る
     );
 
     setState(() {
@@ -89,7 +77,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     });
 
     if (success && mounted) {
-      Navigator.of(context).pop(true); // 成功したら戻る
+      Navigator.of(context).pop(true);
     } else {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -162,23 +150,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
                   const SizedBox(height: 20),
 
-                  // 店舗コード選択ドロップダウン
-                  DropdownButtonFormField<String>(
-                    value: _selectedStoreCode,
-                    decoration: const InputDecoration(
-                      labelText: '所属店舗',
-                      border: OutlineInputBorder(),
+                  // 💡 修正: 店舗コードは編集不可のテキストフィールドとして表示
+                  TextField(
+                    enabled: false, // 編集不可にする
+                    controller: TextEditingController(
+                      text: widget.currentStoreCode,
                     ),
-                    items: _storeCodes.map((code) {
-                      return DropdownMenuItem(value: code, child: Text(code));
-                    }).toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() {
-                          _selectedStoreCode = value;
-                        });
-                      }
-                    },
+                    decoration: InputDecoration(
+                      labelText: '所属店舗 (変更不可)',
+                      border: const OutlineInputBorder(),
+                      filled: true,
+                      fillColor: Colors.grey[200], // 変更できないことを色で表現
+                    ),
                   ),
                 ],
               ),

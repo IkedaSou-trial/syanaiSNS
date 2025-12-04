@@ -13,7 +13,7 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final ApiService _apiService = ApiService();
 
-  // 💡 追加: ExpansionTile を操作するためのコントローラー
+  // 💡 ExpansionTile を操作するためのコントローラー
   final ExpansionTileController _expansionController =
       ExpansionTileController();
 
@@ -207,7 +207,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       final post = _searchResults[index];
                       final author = post['author'];
 
-                      // 💡 ListTile ではなく Card + Column でレイアウトを作り直しました
+                      // 💡 ListTile ではなく Card + Column でレイアウト
                       return Card(
                         margin: const EdgeInsets.symmetric(
                           horizontal: 10,
@@ -263,7 +263,7 @@ class _SearchScreenState extends State<SearchScreen> {
                                   style: const TextStyle(fontSize: 16),
                                 ),
 
-                                // 3. 💡 画像があれば表示
+                                // 3. 画像があれば表示
                                 if (post['imageUrl'] != null) ...[
                                   const SizedBox(height: 8),
                                   ClipRRect(

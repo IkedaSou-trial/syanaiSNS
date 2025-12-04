@@ -1,7 +1,7 @@
-import 'dart:convert'; // Base64 エンコード用
-import 'dart:io'; // File オブジェクト用
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart'; // 画像ピッカーをインポート
+import 'package:image_picker/image_picker.dart';
 import '../services/api_service.dart';
 
 class CreatePostScreen extends StatefulWidget {
@@ -16,15 +16,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final TextEditingController _contentController = TextEditingController();
   bool _isLoading = false;
 
-  final ImagePicker _picker = ImagePicker(); // 💡 ImagePicker のインスタンス
-  File? _imageFile; // 💡 選択された画像ファイル
+  final ImagePicker _picker = ImagePicker();
+  File? _imageFile;
 
-  // 💡 画像を選択するメソッド
-  Future<void> _pickImage() async {
+  // 💡 修正: 引数で source (カメラ or ギャラリー) を受け取るように変更
+  Future<void> _pickImage(ImageSource source) async {
     try {
       final pickedFile = await _picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 800, // 画像サイズを制限してBase64が巨大になりすぎないように
+        source: source, // ここを変更
+        maxWidth: 800,
       );
       if (pickedFile != null) {
         setState(() {
@@ -41,7 +41,40 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
+  // 💡 追加: 選択肢を表示するメソッド
+  void _showImageSourceSelector() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt),
+                title: const Text('カメラで撮影'),
+                onTap: () {
+                  Navigator.pop(context); // シートを閉じる
+                  _pickImage(ImageSource.camera); // カメラを起動
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library),
+                title: const Text('アルバムから選択'),
+                onTap: () {
+                  Navigator.pop(context); // シートを閉じる
+                  _pickImage(ImageSource.gallery); // ギャラリーを開く
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _submitPost() async {
+    // ... (変更なし) ...
     if (_contentController.text.isEmpty) {
       ScaffoldMessenger.of(
         context,
@@ -53,10 +86,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _isLoading = true;
     });
 
-    // 💡 新しいメソッドを呼ぶ
     final success = await _apiService.createPostWithFile(
       _contentController.text,
-      imageFile: _imageFile, // 💡 Fileを直接渡す
+      imageFile: _imageFile,
     );
 
     setState(() {
@@ -96,33 +128,33 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   TextField(
                     controller: _contentController,
                     decoration: const InputDecoration(
-                      labelText: '投稿内容', // ラベルだけ少しシンプルに
+                      labelText: '投稿内容',
                       hintText: '今、何してる？',
                       border: OutlineInputBorder(),
                     ),
                     maxLines: 8,
                     minLines: 3,
-                    // autofocus: true, // 💡 自動でここにフォーカスが当たるようにしても便利です
                   ),
                   const SizedBox(height: 16.0),
-                  // 💡 画像選択ボタン
+
+                  // 💡 修正: 画像がない場合、選択肢シートを表示するように変更
                   _imageFile == null
                       ? ElevatedButton.icon(
-                          onPressed: _pickImage,
-                          icon: const Icon(Icons.image),
-                          label: const Text('画像を選択'),
+                          onPressed: _showImageSourceSelector, // ここを変更
+                          icon: const Icon(Icons.add_a_photo),
+                          label: const Text('写真を追加'),
                         )
                       : Column(
                           children: [
                             Image.file(
                               _imageFile!,
-                              height: 200, // 表示サイズを制限
+                              height: 200,
                               fit: BoxFit.cover,
                             ),
                             TextButton.icon(
                               onPressed: () {
                                 setState(() {
-                                  _imageFile = null; // 選択解除
+                                  _imageFile = null;
                                 });
                               },
                               icon: const Icon(Icons.close),

@@ -47,7 +47,7 @@
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
     <string>プロフィール画像を設定するためにライブラリにアクセスします。</string>
-    <key>NSCameraUsageDescription</key>
-    <string>プロフィール画像を撮影するためにカメラにアクセスします。</string>
+	<key>NSCameraUsageDescription</key>
+    <string>バーコードの読み取りやプロフィール画像の撮影にカメラを使用します。</string>
 </dict>
 </plist>

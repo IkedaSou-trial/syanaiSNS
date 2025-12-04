@@ -1,111 +1,115 @@
 import * as express from 'express';
-import bcrypt from 'bcryptjs'; // 'bcrypt' を 'bcryptjs' に変更
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import prisma from '../lib/prisma'; // 修正: lib/prisma.tsからのインポート
-import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import axios from 'axios'; // 💡 追加: 外部API通信用
+import prisma from '../lib/prisma';
 
 const authRouter = express.Router();
 const SALT_ROUNDS = 10;
-// 💡 注意: 本番環境では .env などで管理してください
-const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_SUPER_SECRET_KEY'; 
+const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_SUPER_SECRET_KEY';
 
 /**
- * POST /signup: 新規ユーザーアカウントの作成
+ * POST /login/barcode
+ * 1. バーコード番号で外部認証サーバーに問い合わせ
+ * 2. 成功したらその情報でアプリ内にユーザーを作成or特定
+ * 3. アプリ用JWTを発行
  */
-authRouter.post('/signup', async (req, res) => {
-  const { username, password, displayName, storeCode } = req.body;
+authRouter.post('/login/barcode', async (req, res) => {
+  const { barcode } = req.body;
 
-  if (!username || !password || !displayName || !storeCode) {
-    return res.status(400).json({ error: '全ての必須フィールドを入力してください。' });
+  if (!barcode) {
+    return res.status(400).json({ error: 'バーコードが読み取れませんでした。' });
   }
 
   try {
-    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+    console.log(`[AUTH] 外部認証APIへ問い合わせ: ${barcode}`);
 
-    const user = await prisma.user.create({
-      data: {
-        username,
-        password: hashedPassword,
-        displayName,
-        storeCode,
-      },
-      select: {
-        id: true,
-        username: true,
-        displayName: true,
-        storeCode: true,
-        createdAt: true,
-      },
+    // 1. 外部認証APIを呼び出す
+    // ⚠️ password, systemid, clientid は固定値として設定しています
+    const authResponse = await axios.post('http://auth-intra.trechina.cn/Apps/authentication/authenticate', {
+      account: barcode, // ここにスキャンしたバーコードが入る
+      password: "670b14728ad9902aecba32e22fa4f6bd", 
+      systemid: "7c095dc3-6bea-4636-bacc-ce9abb19b597",
+      clientid: "10745145"
+    }, {
+      headers: { 'Content-Type': 'application/json' }
     });
 
-    res.status(201).json({ message: 'アカウントが正常に作成されました', user });
-  } catch (error) {
-    if (error instanceof PrismaClientKnownRequestError) {
-        if (error.code === 'P2002') {
-        return res.status(409).json({ error: 'このユーザー名はすでに使用されています。' });
-        }
-        console.error('Signup error:', error);
-        res.status(500).json({ error: 'サーバーエラーによりアカウント作成に失敗しました。' });
+    const authData = authResponse.data;
+
+    // 2. 認証結果を確認
+    // successedが "0" 以外、または user情報がない場合は失敗とみなす
+    if (authData.successed !== "0" || !authData.user) {
+      console.log('[AUTH] 外部認証失敗:', authData.message);
+      return res.status(401).json({ error: '社員情報の取得に失敗しました。' });
     }
-  }
-});
 
-/**
- * POST /login: ユーザーのログインとJWTの発行
- */
-authRouter.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-  console.log(`[AUTH] /login 試行: ${username}`); // ログ1
+    const externalUser = authData.user;
+    console.log(`[AUTH] 社員情報取得成功: ${externalUser.name} (${externalUser.account})`);
 
-  if (!username || !password) {
-    console.log('[AUTH] ユーザー名またはパスワードがありません');
-    return res.status(400).json({ error: 'ユーザー名とパスワードを入力してください。' });
-  }
-
-  try {
-    console.log('[AUTH] データベースでユーザーを検索中...');
-    const user = await prisma.user.findUnique({
-      where: { username },
+    // 3. アプリ内のデータベースでユーザーを検索・作成
+    let user = await prisma.user.findUnique({
+      where: { username: externalUser.account }, // accountをIDとして利用
     });
-    console.log('[AUTH] データベース検索完了。'); // ログ2 (prisma:queryの直後に出るはず)
 
     if (!user) {
-      console.log('[AUTH] ユーザーが見つかりません。');
-      return res.status(401).json({ error: '無効なユーザー名またはパスワードです。' });
+      console.log(`[AUTH] 新規ユーザーとしてDB登録: ${externalUser.name}`);
+      
+      // パスワードはアプリ内では使わないのでランダム生成
+      const dummyPassword = Math.random().toString(36).slice(-8) + Date.now().toString();
+      const hashedPassword = await bcrypt.hash(dummyPassword, SALT_ROUNDS);
+
+      // 所属情報があれば取得（jobs配列の先頭を使用）
+      const orgCode = externalUser.jobs && externalUser.jobs.length > 0 
+        ? externalUser.jobs[0].orgcode 
+        : '000'; // なければデフォルト
+
+      user = await prisma.user.create({
+        data: {
+          username: externalUser.account,
+          password: hashedPassword,
+          displayName: externalUser.name, // ★外部APIの名前をそのまま使う
+          storeCode: orgCode,             // ★外部APIの組織コードを使う
+        },
+      });
+    } else {
+      // 既存ユーザーの場合、外部APIの最新情報（名前や部署）で更新しておくと親切です
+      // 必要なければこの else ブロックは削除しても構いません
+      const orgCode = externalUser.jobs && externalUser.jobs.length > 0 
+        ? externalUser.jobs[0].orgcode 
+        : user.storeCode;
+      
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          displayName: externalUser.name,
+          storeCode: orgCode,
+        }
+      });
     }
 
-    console.log(`[AUTH] ユーザー発見: ${user.username}`);
-    
-    console.log('[AUTH] パスワードを比較中...');
-    const isValid = await bcrypt.compare(password, user.password);
-    console.log(`[AUTH] パスワード比較完了。結果: ${isValid}`);
-
-
-    if (!isValid) {
-      console.log('[AUTH] パスワードが無効です。');
-      return res.status(401).json({ error: '無効なユーザー名またはパスワードです。' });
-    }
-
-    console.log('[AUTH] パスワード有効。JWTを生成中...'); // ログ3
+    // 4. アプリ用JWTトークンを発行
     const token = jwt.sign(
       { userId: user.id, username: user.username },
       JWT_SECRET,
       { expiresIn: '1d' }
     );
 
-    console.log('[AUTH] JWT生成完了。レスポンスを送信します。'); // ログ4
-    res.json({ 
-      message: 'ログイン成功 (デバッグ)', 
+    // 5. レスポンス
+    res.json({
+      message: 'ログイン成功',
       token,
       user: {
         id: user.id,
         username: user.username,
         displayName: user.displayName,
+        storeCode: user.storeCode,
       }
     });
+
   } catch (error) {
-    console.error('[AUTH] /login の catch ブロックでエラー:', error);
-    res.status(500).json({ error: 'サーバーエラーによりログインに失敗しました。' });
+    console.error('Barcode login error:', error);
+    res.status(500).json({ error: '認証サーバーへの接続に失敗しました。' });
   }
 });
 

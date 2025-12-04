@@ -49,6 +49,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
     if (success) {
       _commentController.clear(); // 入力欄をクリア
+      FocusScope.of(context).unfocus(); // キーボードを閉じる
       _refreshComments(); // コメント一覧をリフレッシュ
     } else {
       if (mounted) {
@@ -77,10 +78,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final author = _post['author'] ?? {};
 
     return Scaffold(
-      appBar: AppBar(title: Text(author['displayName'] ?? '投稿')),
+      appBar: AppBar(title: Text(author['displayName'] ?? '投稿詳細')),
       body: Column(
         children: [
-          // --- 1. 投稿内容 ---
+          // --- 1. 投稿内容 (スクロール可能にするためにExpandedに入れるか、ここは固定するか) ---
+          // 今回はコメントリストと一緒にスクロールさせるのではなく、
+          // 「投稿部分」は上に固定し、「コメント部分」だけスクロールするUIにします
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
@@ -89,25 +92,33 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 Row(
                   children: [
                     CircleAvatar(
-                      radius: 18,
+                      radius: 20,
                       backgroundImage: _getImageProvider(
                         _post['author']['profileImageUrl'],
                       ),
                       child: _post['author']['profileImageUrl'] == null
-                          ? const Icon(Icons.person, size: 18)
+                          ? const Icon(Icons.person)
                           : null,
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _post['author']['displayName'] ?? '不明なユーザー',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                      ),
-                    ),
-                    Text(
-                      DateFormatter.timeAgo(_post['createdAt']),
-                      style: const TextStyle(color: Colors.grey, fontSize: 12),
+                    const SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _post['author']['displayName'] ?? '不明なユーザー',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        Text(
+                          DateFormatter.timeAgo(_post['createdAt']),
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -116,24 +127,24 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   _post['content'] ?? '',
                   style: const TextStyle(fontSize: 16),
                 ),
-
-                // 💡 投稿画像があれば表示
                 if (_post['imageUrl'] != null) ...[
                   const SizedBox(height: 10),
-                  Image(
-                    image: _getImageProvider(_post['imageUrl'])!,
-                    fit: BoxFit.cover,
-                    height: 250, // 詳細画面では少し大きく
-                    width: double.infinity,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image(
+                      image: _getImageProvider(_post['imageUrl'])!,
+                      fit: BoxFit.cover,
+                      height: 200,
+                      width: double.infinity,
+                    ),
                   ),
                 ],
-                const SizedBox(height: 10),
               ],
             ),
           ),
-          const Divider(),
+          const Divider(thickness: 1, height: 1),
 
-          // --- 2. コメント一覧 (スクロール可能) ---
+          // --- 2. コメント一覧 ---
           Expanded(
             child: FutureBuilder<List<dynamic>>(
               future: _commentsFuture,
@@ -142,36 +153,67 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                  return const Center(child: Text('まだコメントはありません'));
+                  return const Center(
+                    child: Text(
+                      'コメントはまだありません。\n一番乗りでコメントしよう！',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  );
                 }
 
                 final comments = snapshot.data!;
                 return ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 20),
                   itemCount: comments.length,
                   itemBuilder: (context, index) {
                     final comment = comments[index];
                     final commentAuthor = comment['author'] ?? {};
-                    // 💡 isMine を取得 (バックエンドが対応していれば取得可能)
+                    // バックエンドから返ってきた isMine フラグを使用
                     final isMyComment = comment['isMine'] ?? false;
 
                     return ListTile(
-                      title: Text(commentAuthor['displayName'] ?? '不明'),
+                      leading: CircleAvatar(
+                        radius: 16,
+                        backgroundImage: _getImageProvider(
+                          commentAuthor['profileImageUrl'],
+                        ),
+                        child: commentAuthor['profileImageUrl'] == null
+                            ? const Icon(Icons.person, size: 16)
+                            : null,
+                      ),
+                      title: Row(
+                        children: [
+                          Text(
+                            commentAuthor['displayName'] ?? '不明',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            DateFormatter.timeAgo(comment['createdAt']),
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
                       subtitle: Text(comment['content'] ?? ''),
-                      // 💡 自分のコメントなら削除ボタンを表示
                       trailing: isMyComment
                           ? IconButton(
                               icon: const Icon(
-                                Icons.delete,
-                                size: 20,
+                                Icons.delete_outline,
                                 color: Colors.grey,
                               ),
                               onPressed: () async {
-                                // 💡 確認ダイアログを表示
                                 final shouldDelete = await showDialog<bool>(
                                   context: context,
                                   builder: (context) {
                                     return AlertDialog(
-                                      title: const Text('削除の確認'),
+                                      title: const Text('削除確認'),
                                       content: const Text('このコメントを削除しますか？'),
                                       actions: [
                                         TextButton(
@@ -192,12 +234,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   },
                                 );
 
-                                // 「削除」が選ばれた場合のみ実行
                                 if (shouldDelete == true) {
                                   final success = await _apiService
                                       .deleteComment(_postId, comment['id']);
                                   if (success) {
-                                    _refreshComments(); // コメント一覧を更新
+                                    _refreshComments();
                                     if (mounted) {
                                       ScaffoldMessenger.of(
                                         context,
@@ -211,7 +252,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 }
                               },
                             )
-                          : null, // 自分以外のコメントには何も表示しない
+                          : null,
                     );
                   },
                 );
@@ -219,26 +260,50 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             ),
           ),
 
-          // --- 3. コメント入力欄 ---
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _commentController,
-                    decoration: const InputDecoration(
-                      hintText: 'コメントを追加...',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.send),
-                  onPressed: _submitComment,
+          // --- 3. コメント入力エリア ---
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.2),
+                  spreadRadius: 1,
+                  blurRadius: 3,
+                  offset: const Offset(0, -1),
                 ),
               ],
+            ),
+            child: SafeArea(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _commentController,
+                      decoration: InputDecoration(
+                        hintText: 'コメントを入力...',
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[100],
+                      ),
+                      minLines: 1,
+                      maxLines: 3,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.send, color: Colors.blue),
+                    onPressed: _submitComment,
+                  ),
+                ],
+              ),
             ),
           ),
         ],

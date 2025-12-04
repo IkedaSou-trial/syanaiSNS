@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import 'scanner_screen.dart'; // ScannerScreenのインポート
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -13,42 +14,51 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   String _errorMessage = '';
 
-  // ★ このフラグが true の時だけデバッグボタンが表示されます
+  // デバッグ入力用のコントローラー
+  final TextEditingController _debugBarcodeController = TextEditingController();
+
+  // ★ このフラグが true の時だけデバッグメニューが表示されます
   final bool _isDev = true;
 
   Future<void> _handleLogin(String barcode) async {
+    String employeeId = barcode;
+
+    // "2000"から始まる13桁のコードの場合、真ん中の8桁を取り出す
+    if (barcode.length == 13 && barcode.startsWith('2000')) {
+      employeeId = barcode.substring(4, 12);
+      print('社員番号抽出: $barcode -> $employeeId');
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = '';
     });
 
     try {
-      print('ログイン試行: $barcode');
+      print('ログイン試行: $employeeId');
 
-      // APIサービス経由でログイン処理
-      final success = await _apiService.loginWithBarcode(barcode);
+      final result = await _apiService.loginWithBarcode(employeeId);
 
       if (!mounted) return;
 
-      if (success) {
-        // ログイン成功！ホーム画面へ移動
-        // 💡 MainScreen に渡すためのユーザー情報を引数に追加
+      if (result is Map<String, dynamic>) {
+        final user = result;
         Navigator.of(context).pushReplacementNamed(
           '/home',
           arguments: {
-            'username': 'test_store_user', // 本来はAPIから取得した値
-            'displayName': 'テスト店長',
-            'storeCode': '001',
+            'username': user['username'],
+            'displayName': user['displayName'],
+            'storeCode': user['storeCode'],
           },
         );
       } else {
         setState(() {
-          _errorMessage = 'ログインに失敗しました (APIエラー)';
+          _errorMessage = result.toString();
         });
       }
     } catch (e) {
       setState(() {
-        _errorMessage = 'ログイン処理中にエラーが発生しました';
+        _errorMessage = 'エラー: $e\n\n接続先: ${_apiService.baseUrl}';
       });
     } finally {
       if (mounted) {
@@ -59,10 +69,17 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _startCamera() {
-    print('カメラ起動（未実装）');
-    // 実機テスト用: カメラボタンを押しても仮ログインできるようにしておく
-    _handleLogin('10260220');
+  // カメラボタンが押された時の処理
+  Future<void> _startCamera() async {
+    // 1. スキャナー画面に遷移し、結果（バーコード文字列）を待つ
+    final result = await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (context) => const ScannerScreen()));
+
+    // 2. 結果が返ってきたらログイン処理を実行
+    if (result != null && result is String) {
+      _handleLogin(result);
+    }
   }
 
   @override
@@ -70,87 +87,115 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.store, size: 80, color: Colors.blue),
-              const SizedBox(height: 16),
-              const Text(
-                '店舗VMD共有アプリ',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              const Text('社員証をスキャンして開始', style: TextStyle(color: Colors.grey)),
-              const SizedBox(height: 48),
-
-              // エラー表示エリア
-              if (_errorMessage.isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  margin: const EdgeInsets.only(bottom: 16),
-                  color: Colors.red[50],
-                  child: Text(
-                    _errorMessage,
-                    style: const TextStyle(color: Colors.red),
-                  ),
-                ),
-
-              // メイン：スキャンボタン
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton.icon(
-                  onPressed: _isLoading ? null : _startCamera,
-                  icon: const Icon(Icons.camera_alt),
-                  label: Text(
-                    _isLoading ? '認証中...' : 'スキャンしてログイン',
-                    style: const TextStyle(fontSize: 18),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue[800],
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: () {
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(const SnackBar(content: Text('手入力機能は開発中です')));
-                },
-                child: const Text('社員証がない方はこちら（番号入力）'),
-              ),
-
-              // ▼▼▼ ここにデバッグボタンがあります ▼▼▼
-              if (_isDev) ...[
-                const SizedBox(height: 60),
-                const Divider(),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.store, size: 80, color: Colors.blue),
+                const SizedBox(height: 16),
                 const Text(
-                  '開発者用メニュー (PCテスト用)',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  '店舗VMD共有アプリ',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
+                const Text(
+                  '社員証をスキャンして開始',
+                  style: TextStyle(color: Colors.grey),
+                ),
+                const SizedBox(height: 48),
+
+                // ❌ ここにあったデバッグボタンを削除し、下に移動しました
+
+                // エラー表示エリア
+                if (_errorMessage.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    color: Colors.red[50],
+                    child: Text(
+                      _errorMessage,
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  ),
+
+                // メイン：スキャンボタン
                 SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => _handleLogin('99999999'),
-                    child: const Text('🛠 【Debug】テスト店長としてログイン'),
+                  height: 56,
+                  child: ElevatedButton.icon(
+                    onPressed: _isLoading ? null : _startCamera,
+                    icon: const Icon(Icons.camera_alt),
+                    label: Text(
+                      _isLoading ? '認証中...' : 'スキャンしてログイン',
+                      style: const TextStyle(fontSize: 18),
+                    ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.grey[800],
+                      backgroundColor: Colors.blue[800],
                       foregroundColor: Colors.white,
-                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                   ),
                 ),
+
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('手入力機能は開発中です')),
+                    );
+                  },
+                  child: const Text('社員証がない方はこちら（番号入力）'),
+                ),
+
+                // ▼▼▼ 開発者用メニュー（ここにボタンを移動しました） ▼▼▼
+                if (_isDev) ...[
+                  const SizedBox(height: 60),
+                  const Divider(),
+                  const Text(
+                    '開発者用メニュー (PCテスト用)',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // 1. 任意のバーコードを入力するフィールド
+                  TextField(
+                    controller: _debugBarcodeController,
+                    decoration: const InputDecoration(
+                      labelText: 'バーコードNo.手入力',
+                      hintText: '例: 10243633',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      prefixIcon: Icon(Icons.qr_code),
+                    ),
+                    keyboardType: TextInputType.number,
+                  ),
+                  const SizedBox(height: 8),
+
+                  // 2. 入力された値を使ってログインするボタン (ここに配置！)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        final code = _debugBarcodeController.text;
+                        if (code.isNotEmpty) {
+                          _handleLogin(code);
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey[800],
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                      ),
+                      child: const Text('🛠 入力値でログイン'),
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

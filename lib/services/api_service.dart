@@ -6,22 +6,31 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiService {
   // プラットフォーム（OS）に応じてベースURLを自動で切り替えます
+
   String get _baseUrl {
+    // 例: "http://192.168.1.15:3000" (最後の :3000 はポート番号なので残す)
+    const String ngrokUrl =
+        "https://unferreted-campbell-hypermetaphorical.ngrok-free.dev"; // <-- ここにあなたの PCのIPアドレス または ngrok URL を入れてください
     if (Platform.isAndroid) {
+      //return pcIpAddress;
       return "http://10.0.2.2:3000"; // Androidエミュレータ
     } else if (Platform.isIOS) {
-      return "http://localhost:3000"; // iOSシミュレータ
+      return ngrokUrl.trim(); // iOSシミュレータ
+      //return "http://localhost:3000"; // iOSシミュレータ（実機の場合はPCのIPアドレスに変更する必要あり）
     } else {
       return "http://localhost:3000"; // Webやデスクトップなど
     }
   }
+
+  String get baseUrl => _baseUrl;
 
   final _storage = const FlutterSecureStorage();
 
   // ヘッダーを生成するヘルパー
   Future<Map<String, String>> _getHeaders({bool needsAuth = false}) async {
     final headers = <String, String>{
-      'Content-Type': 'application/json; charset=UTF-8',
+      'Content-Type': 'application/json',
+      'ngrok-skip-browser-warning': 'true',
     };
     if (needsAuth) {
       final token = await _storage.read(key: 'jwt_token');
@@ -33,20 +42,41 @@ class ApiService {
   }
 
   // --- 🆕 バーコードログイン API ---
-  Future<bool> loginWithBarcode(String barcode) async {
+  Future<dynamic> loginWithBarcode(String barcode) async {
     try {
       print('API呼び出し: バーコードログイン ($barcode)');
-      await Future.delayed(const Duration(seconds: 1)); // 通信のフリ
 
-      // 仮実装: ダミートークン保存
-      const fakeToken = "dummy_jwt_token_for_development";
-      await _storage.write(key: 'jwt_token', value: fakeToken);
-      await _storage.write(key: 'current_user_name', value: "テスト店長");
+      // ngrok または PCのIPアドレスを設定
+      // ※ここにあなたの ngrok URL または IPアドレスを入れてください
+      final url = Uri.parse('$_baseUrl/auth/login/barcode');
 
-      return true;
+      print("url: $url");
+      print("Headers: ${await _getHeaders()}");
+      print("Request body: ${jsonEncode({'barcode': barcode})}");
+      final response = await http.post(
+        url,
+        headers: await _getHeaders(),
+        body: jsonEncode({'barcode': barcode}),
+      );
+
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final token = data['token'];
+        await _storage.write(key: 'jwt_token', value: token);
+
+        // 成功時はユーザー情報(Map)を返す
+        return data['user'];
+      } else {
+        // 失敗時はサーバーからのエラーメッセージ(String)を返す
+        return 'サーバーエラー (${response.statusCode}):\n${response.body}';
+      }
     } catch (e) {
+      // 通信エラーなどの例外も文字列として返す
       print('Login error: $e');
-      return false;
+      return '通信エラーが発生しました:\n$e';
     }
   }
 

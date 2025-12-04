@@ -1,6 +1,5 @@
 import * as express from 'express';
 import prisma from '../lib/prisma';
-// 💡 1. AuthRequest をインポート
 import { authenticateJWT, authenticateJWT_Optional, AuthRequest } from '../auth/auth.middleware';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
@@ -10,10 +9,9 @@ const commentRouter = express.Router({ mergeParams: true });
  * GET /posts/:postId/comments
  * 特定の投稿ID（postId）のコメント一覧を取得
  */
-// 💡 2. req の型を AuthRequest<{ postId: string }> に変更
 commentRouter.get('/', authenticateJWT_Optional, async (req: AuthRequest<{ postId: string }>, res) => {
   const { postId } = req.params;
-  const userId = req.user?.id; // これでエラーが消えます
+  const userId = req.user?.id;
 
   try {
     const comments = await prisma.comment.findMany({
@@ -34,7 +32,7 @@ commentRouter.get('/', authenticateJWT_Optional, async (req: AuthRequest<{ postI
       },
     });
 
-    // 自分のコメントかどうかのフラグ (isMine) を追加
+    // 自分のコメントかどうかのフラグ (isMine) を追加して返す
     const commentsWithStatus = comments.map(comment => ({
       ...comment,
       isMine: userId && comment.authorId === userId,
@@ -51,11 +49,10 @@ commentRouter.get('/', authenticateJWT_Optional, async (req: AuthRequest<{ postI
  * POST /posts/:postId/comments
  * 特定の投稿ID（postId）にコメントを作成 (認証必須)
  */
-// 💡 3. req の型を AuthRequest<{ postId: string }> に変更
 commentRouter.post('/', authenticateJWT, async (req: AuthRequest<{ postId: string }>, res) => {
   const { postId } = req.params;
   const { content } = req.body;
-  const authorId = req.user?.id; // これでエラーが消えます
+  const authorId = req.user?.id;
 
   if (!content) {
     return res.status(400).json({ error: 'コメント内容（content）は必須です。' });
@@ -105,11 +102,9 @@ commentRouter.post('/', authenticateJWT, async (req: AuthRequest<{ postId: strin
  * DELETE /posts/:postId/comments/:commentId
  * コメントを削除する (本人のみ)
  */
-// 💡 4. req の型を AuthRequest<{ commentId: string }> に変更
-// (URLパラメータに必要なのは commentId だけですが、postIdも受け取るなら { postId: string; commentId: string } でも可)
-commentRouter.delete('/:commentId', authenticateJWT, async (req: AuthRequest<{ commentId: string }>, res) => {
+commentRouter.delete('/:commentId', authenticateJWT, async (req: AuthRequest<{ postId: string; commentId: string }>, res) => {
   const { commentId } = req.params;
-  const userId = req.user?.id; // これでエラーが消えます
+  const userId = req.user?.id;
 
   if (!userId) return res.status(403).json({ error: '認証が必要です' });
 
@@ -117,7 +112,7 @@ commentRouter.delete('/:commentId', authenticateJWT, async (req: AuthRequest<{ c
     const { count } = await prisma.comment.deleteMany({
       where: {
         id: commentId,
-        authorId: userId,
+        authorId: userId, // 自分のコメントのみ削除可能
       },
     });
 
