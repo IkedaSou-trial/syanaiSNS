@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:like_button/like_button.dart'; // 💡 追加
+import 'package:like_button/like_button.dart';
 import '../services/api_service.dart';
 import 'dart:convert';
 import '../utils/date_formatter.dart';
@@ -21,16 +21,55 @@ class _HomeScreenState extends State<HomeScreen>
 
   late TabController _tabController;
 
+  // バッジフラグ (初期値は false に変更)
+  bool _hasNewFollowing = false;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+
+    _tabController.addListener(() {
+      // 「フォロー中」タブ（インデックス1）が選ばれたら
+      if (!_tabController.indexIsChanging && _tabController.index == 1) {
+        setState(() {
+          _hasNewFollowing = false; // バッジを消す
+        });
+        // 💡 修正: 見た時間を保存する
+        _apiService.saveLastReadTime('following');
+      }
+    });
+
     _refreshPosts();
   }
 
+  // 💡 追加: 未読チェックロジック
+  Future<void> _checkUnreadStatus(List<dynamic> posts) async {
+    if (posts.isEmpty) return;
+
+    // 最新の投稿の日時を取得
+    final latestPostTimeStr = posts.first['createdAt']; // リストは降順なので先頭が最新
+    if (latestPostTimeStr == null) return;
+
+    final latestPostTime = DateTime.tryParse(latestPostTimeStr);
+    if (latestPostTime == null) return;
+
+    // 保存されている「最後に見た時間」を取得
+    final lastReadTime = await _apiService.getLastReadTime('following');
+
+    // 「最後に見た時間がない（初回）」または「最新投稿の方が新しい」場合にバッジをつける
+    if (lastReadTime == null || latestPostTime.isAfter(lastReadTime)) {
+      if (mounted) {
+        setState(() {
+          _hasNewFollowing = true;
+        });
+      }
+    }
+  }
+
   Future<void> _refreshPosts() async {
-    // 引っ張って更新の時はローディングを出さない方が自然ですが、
-    // 初回ロード時は出すように制御しても良いです。今回は簡易的にそのまま。
+    // ローディング中もバッジの状態は維持したいので、ここではフラグをリセットしない
+
     final results = await Future.wait([
       _apiService.getPosts(),
       _apiService.getPosts(onlyFollowing: true),
@@ -42,10 +81,18 @@ class _HomeScreenState extends State<HomeScreen>
         _followingPosts = results[1];
         _isLoading = false;
       });
+
+      // 💡 修正: データの取得が終わったら、未読チェックを行う
+      // もし現在「フォロー中タブ」を開いているなら、チェックせずに既読にする
+      if (_tabController.index == 1) {
+        _apiService.saveLastReadTime('following');
+      } else {
+        _checkUnreadStatus(_followingPosts);
+      }
     }
   }
 
-  // 💡 投稿削除処理
+  // 投稿削除処理
   Future<void> _deletePostProcess(String postId) async {
     final shouldDelete = await showDialog<bool>(
       context: context,
@@ -123,9 +170,9 @@ class _HomeScreenState extends State<HomeScreen>
                 horizontal: 8.0,
                 vertical: 6.0,
               ),
-              elevation: 2, // 💡 少し影をつけてリッチに
+              elevation: 2,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12), // 💡 角丸を少し大きく
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(12.0),
@@ -188,7 +235,7 @@ class _HomeScreenState extends State<HomeScreen>
                         if (isMine)
                           IconButton(
                             icon: const Icon(
-                              Icons.more_horiz, // 💡 メニューっぽいアイコンに変更
+                              Icons.more_horiz,
                               color: Colors.grey,
                             ),
                             onPressed: () => _deletePostProcess(post['id']),
@@ -214,7 +261,6 @@ class _HomeScreenState extends State<HomeScreen>
                             image: _getImageProvider(post['imageUrl'])!,
                             fit: BoxFit.cover,
                             width: double.infinity,
-                            // 高さを固定せず、アスペクト比で表示するとより現代的ですが、今回は固定で
                             height: 250,
                           ),
                         ),
@@ -225,7 +271,6 @@ class _HomeScreenState extends State<HomeScreen>
                     // アクションボタンエリア
                     Row(
                       children: [
-                        // 💡 いいねボタン (アニメーション付き)
                         LikeButton(
                           size: 24,
                           isLiked: isLikedByMe,
@@ -241,7 +286,6 @@ class _HomeScreenState extends State<HomeScreen>
                                   ),
                                 );
                               },
-                          // サーバーへのリクエスト処理
                           onTap: (bool isLiked) async {
                             bool success;
                             if (isLiked) {
@@ -251,14 +295,12 @@ class _HomeScreenState extends State<HomeScreen>
                             } else {
                               success = await _apiService.likePost(post['id']);
                             }
-                            // API通信が成功したら、新しい状態(!isLiked)を返す
                             return success ? !isLiked : isLiked;
                           },
                         ),
 
                         const SizedBox(width: 24),
 
-                        // コメントアイコン
                         Row(
                           children: [
                             const Icon(
@@ -292,13 +334,13 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50], // 💡 背景を少しグレーにしてカードを目立たせる
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: const Text(
           'タイムライン',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        centerTitle: false, // 左寄せでSNSっぽく
+        centerTitle: false,
         elevation: 0,
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
@@ -307,9 +349,22 @@ class _HomeScreenState extends State<HomeScreen>
           labelColor: Colors.blue[800],
           unselectedLabelColor: Colors.grey,
           indicatorColor: Colors.blue[800],
-          tabs: const [
-            Tab(text: 'おすすめ'),
-            Tab(text: 'フォロー中'),
+          tabs: [
+            const Tab(text: 'おすすめ'),
+            // 💡 修正3: 変数を使ってバッジの表示/非表示を切り替える
+            Tab(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text('フォロー中'),
+                  if (_hasNewFollowing) ...[
+                    // 変数がtrueの時だけ表示
+                    const SizedBox(width: 8),
+                    const Badge(smallSize: 8, backgroundColor: Colors.red),
+                  ],
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -323,7 +378,7 @@ class _HomeScreenState extends State<HomeScreen>
           final result = await Navigator.of(context).pushNamed('/create_post');
           if (result == true) _refreshPosts();
         },
-        child: const Icon(Icons.edit, color: Colors.white), // 💡 ペンアイコンに変更
+        child: const Icon(Icons.edit, color: Colors.white),
       ),
     );
   }

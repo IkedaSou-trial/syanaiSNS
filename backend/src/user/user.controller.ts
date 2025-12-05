@@ -1,7 +1,8 @@
 import * as express from 'express';
 import prisma from '../lib/prisma';
 import { authenticateJWT, AuthRequest, authenticateJWT_Optional } from '../auth/auth.middleware';
-import cloudinary from '../lib/cloudinary'; // 💡 追加: 画像アップロード用
+// ▼▼▼ 修正: { } をつけてインポートする ▼▼▼
+import { cloudinary } from '../lib/cloudinary';
 
 const userRouter = express.Router();
 

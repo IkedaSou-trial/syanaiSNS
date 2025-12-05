@@ -28,28 +28,11 @@ class _RankingScreenState extends State<RankingScreen> {
 
     try {
       final posts = await _apiService.getRanking(_periodType);
-
-      // ★ダミーデータ（バックエンド未実装時用）
-      // APIが空配列を返してきたら、テスト用にダミーを表示してみる
-      if (posts.isEmpty) {
-        _rankingPosts = List.generate(
-          10,
-          (index) => {
-            "id": "rank_$index",
-            "author": {
-              "displayName": "スタッフ${index + 1}",
-              "storeCode": "00${index % 3 + 1}",
-            },
-            "content": "今週の注力商品ディスプレイです！売上昨対120%達成しました。",
-            "likeCount": 100 - (index * 5), // 1位は100いいね
-            "imageUrl": null, // 画像があればURLを入れる
-          },
-        );
-      } else {
-        _rankingPosts = posts;
-      }
+      // 💡 修正: ダミーデータ生成処理を削除し、APIの結果をそのまま使う
+      _rankingPosts = posts;
     } catch (e) {
       print('ランキング取得エラー: $e');
+      _rankingPosts = []; // エラー時は空にする
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -90,6 +73,25 @@ class _RankingScreenState extends State<RankingScreen> {
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
+                : _rankingPosts.isEmpty
+                // 💡 修正: データがない場合のメッセージを表示
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.emoji_events_outlined,
+                          size: 60,
+                          color: Colors.grey[300],
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          '集計期間中の投稿はありません',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  )
                 : ListView.builder(
                     itemCount: _rankingPosts.length,
                     itemBuilder: (context, index) {
@@ -129,7 +131,7 @@ class _RankingScreenState extends State<RankingScreen> {
                               ],
                             ),
                           ),
-                          // タップしたら詳細へ（ルート設定済みなら）
+                          // タップしたら詳細へ
                           onTap: () {
                             Navigator.pushNamed(
                               context,
@@ -169,7 +171,7 @@ class _RankingScreenState extends State<RankingScreen> {
     );
   }
 
-  // 順位バッジの見た目（1〜3位は特別色）
+  // 順位バッジの見た目
   Widget _buildRankBadge(int rank) {
     Color bgColor;
     if (rank == 1)

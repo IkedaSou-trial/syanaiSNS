@@ -28,8 +28,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // プロフィールと投稿を取得
   Future<void> _fetchProfile() async {
-    // リフレッシュ時は画面全体をローディングにしない（リストだけ更新したい場合もあるため）
-    // ここではシンプルに毎回ローディングを出します
+    // 画面全体をローディングにするのは初回のみにするため、
+    // ここではあえて setState(() => _isLoading = true) を書きません。
+    // そうすることで、引っ張って更新の時は今の画面を表示したまま裏で通信できます。
+
     final data = await _apiService.getUserProfile(widget.username);
 
     if (mounted) {
@@ -43,9 +45,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // 💡 追加: 投稿削除メソッド
   Future<void> _deletePost(String postId) async {
-    // 確認ダイアログ
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -67,13 +67,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
 
     if (shouldDelete == true) {
-      // API呼び出し
       final success = await _apiService.deletePost(postId);
       if (success) {
-        // 成功したらリストから削除して再描画（再度APIを呼ばなくても消せる）
         setState(() {
           _userPosts.removeWhere((post) => post['id'] == postId);
-          // 投稿数も減らす
           if (_userData != null) {
             _userData!['postCount'] = (_userData!['postCount'] ?? 1) - 1;
           }
@@ -88,7 +85,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // 💡 追加: 画像表示用ヘルパー (HomeScreenと同じ)
   ImageProvider? _getImageProvider(String? url) {
     if (url == null) return null;
     if (url.startsWith('data:')) {
@@ -102,7 +98,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return NetworkImage(url);
   }
 
-  // 💡 追加: いいね切り替えメソッド (HomeScreenと同じロジック)
   Future<void> _toggleLike(String postId, bool isCurrentlyLiked) async {
     bool success;
     if (isCurrentlyLiked) {
@@ -124,7 +119,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // 💡 追加: フォロー/アンフォローメソッド
   Future<void> _toggleFollow() async {
     if (_userData == null) return;
 
@@ -140,9 +134,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (success) {
       setState(() {
-        // フォロー状態を反転
         _userData!['isFollowing'] = !isFollowing;
-        // フォロワー数を増減
         int currentFollowers = _userData!['followerCount'] ?? 0;
         _userData!['followerCount'] = currentFollowers + (isFollowing ? -1 : 1);
       });
@@ -151,7 +143,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildCountColumn(String label, int count, {VoidCallback? onTap}) {
     return InkWell(
-      // 💡 タップ可能にする
       onTap: onTap,
       child: Column(
         children: [
@@ -166,7 +157,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _handleLogout() async {
-    // 確認ダイアログを出すと親切です
     final shouldLogout = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -229,6 +219,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                 );
+                // 編集から戻ってきたら自動更新
                 if (result == true) {
                   _fetchProfile();
                 }
@@ -241,220 +232,209 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            // --- 1. ユーザー情報ヘッダー (変更なし) ---
-            Container(
-              padding: const EdgeInsets.all(20),
-              alignment: Alignment.center,
-              child: Column(
-                children: [
-                  CircleAvatar(
-                    radius: 40,
-                    backgroundImage: _getImageProvider(
-                      _userData!['profileImageUrl'],
+      // ▼▼▼ 修正: RefreshIndicator で囲む ▼▼▼
+      body: RefreshIndicator(
+        onRefresh: _fetchProfile, // 引っ張った時に呼ぶ関数
+        child: SingleChildScrollView(
+          // ▼▼▼ 修正: コンテンツが少なくてもスクロールできるようにする ▼▼▼
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Column(
+            children: [
+              // --- 1. ユーザー情報ヘッダー ---
+              Container(
+                padding: const EdgeInsets.all(20),
+                alignment: Alignment.center,
+                child: Column(
+                  children: [
+                    CircleAvatar(
+                      radius: 40,
+                      backgroundImage: _getImageProvider(
+                        _userData!['profileImageUrl'],
+                      ),
+                      child: _userData!['profileImageUrl'] == null
+                          ? const Icon(Icons.person, size: 40)
+                          : null,
                     ),
-                    child: _userData!['profileImageUrl'] == null
-                        ? const Icon(Icons.person, size: 40)
-                        : null,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    _userData!['displayName'],
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
+                    const SizedBox(height: 10),
+                    Text(
+                      _userData!['displayName'],
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                  Text(
-                    '@${_userData!['username']}',
-                    style: const TextStyle(color: Colors.grey),
-                  ),
-                  const SizedBox(height: 5),
-                  Chip(label: Text('店舗: ${_userData!['storeCode']}')),
-                  const SizedBox(height: 10),
-                  Text(
-                    '投稿数: ${_userData!['postCount']}件',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 10),
+                    Text(
+                      '@${_userData!['username']}',
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                    const SizedBox(height: 5),
+                    Chip(label: Text('店舗: ${_userData!['storeCode']}')),
+                    const SizedBox(height: 10),
+                    Text(
+                      '投稿数: ${_userData!['postCount']}件',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 10),
 
-                  // 💡 フォロー・フォロワー数の表示
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _buildCountColumn(
-                        "フォロー中",
-                        followingCount,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => UserListScreen(
-                                username: _userData!['username'],
-                                title: 'フォロー中',
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildCountColumn(
+                          "フォロー中",
+                          followingCount,
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => UserListScreen(
+                                  username: _userData!['username'],
+                                  title: 'フォロー中',
+                                ),
                               ),
-                            ),
-                          );
-                        },
-                      ),
-                      const SizedBox(width: 20),
-                      _buildCountColumn("フォロワー", followerCount),
-                      const SizedBox(width: 20),
-                      _buildCountColumn("投稿", _userData!['postCount']),
-                    ],
-                  ),
-
-                  const SizedBox(height: 15),
-
-                  // 💡 自分以外なら「フォローボタン」を表示
-                  if (!isMe)
-                    ElevatedButton(
-                      onPressed: _toggleFollow,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: isFollowing
-                            ? Colors.grey
-                            : Colors.blue,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: Text(isFollowing ? 'フォロー解除' : 'フォローする'),
-                    ),
-                ],
-              ),
-            ),
-            const Divider(),
-            // --- 2. ユーザーの投稿一覧 (デザイン修正と削除ボタン追加) ---
-            _userPosts.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(20.0),
-                    child: Text('投稿はまだありません'),
-                  )
-                : ListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: _userPosts.length,
-                    itemBuilder: (context, index) {
-                      final post = _userPosts[index];
-                      // 💡 バックエンド user.controller.ts が isMine を返している前提
-                      final isMine = post['isMine'] ?? false;
-
-                      // 💡 各種データを取得
-                      final likeCount = post['likeCount'] ?? 0;
-                      final commentCount = post['commentCount'] ?? 0;
-                      final isLikedByMe = post['isLikedByMe'] ?? false;
-
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
+                            );
+                          },
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // ヘッダー行 (日付と削除ボタン)
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    DateFormatter.timeAgo(post['createdAt']),
-                                    style: const TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  if (isMine)
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.delete,
-                                        size: 20,
+                        const SizedBox(width: 20),
+                        _buildCountColumn("フォロワー", followerCount),
+                        const SizedBox(width: 20),
+                        _buildCountColumn("投稿", _userData!['postCount']),
+                      ],
+                    ),
+
+                    const SizedBox(height: 15),
+
+                    if (!isMe)
+                      ElevatedButton(
+                        onPressed: _toggleFollow,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isFollowing
+                              ? Colors.grey
+                              : Colors.blue,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: Text(isFollowing ? 'フォロー解除' : 'フォローする'),
+                      ),
+                  ],
+                ),
+              ),
+              const Divider(),
+
+              // --- 2. ユーザーの投稿一覧 ---
+              _userPosts.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(20.0),
+                      child: Text('投稿はまだありません'),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _userPosts.length,
+                      itemBuilder: (context, index) {
+                        final post = _userPosts[index];
+                        final isMine = post['isMine'] ?? false;
+                        final likeCount = post['likeCount'] ?? 0;
+                        final commentCount = post['commentCount'] ?? 0;
+                        final isLikedByMe = post['isLikedByMe'] ?? false;
+
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      DateFormatter.timeAgo(post['createdAt']),
+                                      style: const TextStyle(
                                         color: Colors.grey,
+                                        fontSize: 12,
                                       ),
-                                      onPressed: () => _deletePost(post['id']),
-                                      constraints: const BoxConstraints(),
-                                      padding: EdgeInsets.zero,
                                     ),
+                                    if (isMine)
+                                      IconButton(
+                                        icon: const Icon(
+                                          Icons.delete,
+                                          size: 20,
+                                          color: Colors.grey,
+                                        ),
+                                        onPressed: () =>
+                                            _deletePost(post['id']),
+                                        constraints: const BoxConstraints(),
+                                        padding: EdgeInsets.zero,
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 5),
+                                Text(
+                                  post['content'],
+                                  style: const TextStyle(fontSize: 16),
+                                ),
+                                if (post['imageUrl'] != null) ...[
+                                  const SizedBox(height: 8),
+                                  Image(
+                                    image: _getImageProvider(post['imageUrl'])!,
+                                    fit: BoxFit.cover,
+                                    height: 150,
+                                    width: double.infinity,
+                                  ),
                                 ],
-                              ),
-                              const SizedBox(height: 5),
-
-                              // 本文
-                              Text(
-                                post['content'],
-                                style: const TextStyle(fontSize: 16),
-                              ),
-
-                              // 💡 画像があれば表示
-                              if (post['imageUrl'] != null) ...[
-                                const SizedBox(height: 8),
-                                Image(
-                                  image: _getImageProvider(post['imageUrl'])!,
-                                  fit: BoxFit.cover,
-                                  height: 150,
-                                  width: double.infinity,
+                                const SizedBox(height: 10),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    InkWell(
+                                      onTap: () {
+                                        Navigator.of(context).pushNamed(
+                                          '/post_detail',
+                                          arguments: post,
+                                        );
+                                      },
+                                      child: const Text(
+                                        '詳細',
+                                        style: TextStyle(color: Colors.blue),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 16),
+                                    const Icon(
+                                      Icons.chat_bubble_outline,
+                                      size: 20,
+                                      color: Colors.grey,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text('$commentCount'),
+                                    const SizedBox(width: 16),
+                                    IconButton(
+                                      icon: Icon(
+                                        isLikedByMe
+                                            ? Icons.favorite
+                                            : Icons.favorite_border,
+                                        color: isLikedByMe
+                                            ? Colors.red
+                                            : Colors.grey,
+                                      ),
+                                      onPressed: () =>
+                                          _toggleLike(post['id'], isLikedByMe),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text('$likeCount'),
+                                  ],
                                 ),
                               ],
-
-                              const SizedBox(height: 10),
-
-                              // 💡 アクションエリア (詳細リンク、コメント数、いいね数)
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: [
-                                  // 詳細へ飛ぶ
-                                  InkWell(
-                                    onTap: () {
-                                      Navigator.of(context).pushNamed(
-                                        '/post_detail',
-                                        arguments: post,
-                                      );
-                                    },
-                                    child: const Text(
-                                      '詳細',
-                                      style: TextStyle(color: Colors.blue),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 16),
-
-                                  // コメントアイコンと数
-                                  const Icon(
-                                    Icons.chat_bubble_outline,
-                                    size: 20,
-                                    color: Colors.grey,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text('$commentCount'),
-
-                                  const SizedBox(width: 16),
-
-                                  // いいねボタンと数
-                                  IconButton(
-                                    icon: Icon(
-                                      isLikedByMe
-                                          ? Icons.favorite
-                                          : Icons.favorite_border,
-                                      color: isLikedByMe
-                                          ? Colors.red
-                                          : Colors.grey,
-                                    ),
-                                    onPressed: () =>
-                                        _toggleLike(post['id'], isLikedByMe),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text('$likeCount'),
-                                ],
-                              ),
-                            ],
+                            ),
                           ),
-                        ),
-                      );
-                    },
-                  ),
-          ],
+                        );
+                      },
+                    ),
+            ],
+          ),
         ),
       ),
     );

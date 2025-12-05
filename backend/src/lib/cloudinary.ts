@@ -14,17 +14,14 @@ const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
     return {
-      folder: 'shainai_sns_posts', // Cloudinary上のフォルダ名
-      allowed_formats: ['jpg', 'png', 'jpeg', 'heic'], // 許可する形式
-      // 画像をリサイズ・圧縮設定
+      folder: 'shainai_sns_posts',
+      allowed_formats: ['jpg', 'png', 'jpeg', 'heic'],
       transformation: [{ width: 1000, crop: 'limit', quality: 'auto' }],
     };
   },
 });
 
-// アップロード用のミドルウェア (post.controller.tsで使用)
 export const upload = multer({ storage: storage });
 
-// ▼▼▼ これを追加してください！ ▼▼▼
-// Cloudinary本体をエクスポート (user.controller.tsで使用)
-export default cloudinary;
+// ▼▼▼ 修正: export default をやめて、名前付きエクスポートにする ▼▼▼
+export { cloudinary };

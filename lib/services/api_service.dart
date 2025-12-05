@@ -402,4 +402,20 @@ class ApiService {
       return [];
     }
   }
+  // --- 未読管理用のメソッド ---
+
+  // 最後に見た時間を保存する
+  Future<void> saveLastReadTime(String key) async {
+    final now = DateTime.now().toIso8601String();
+    await _storage.write(key: 'last_read_$key', value: now);
+  }
+
+  // 最後に見た時間を取得する
+  Future<DateTime?> getLastReadTime(String key) async {
+    final timeStr = await _storage.read(key: 'last_read_$key');
+    if (timeStr != null) {
+      return DateTime.tryParse(timeStr);
+    }
+    return null; // まだ保存されていない場合（初回など）
+  }
 }

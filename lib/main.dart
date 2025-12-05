@@ -18,7 +18,7 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: '店舗VMD共有',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        primarySwatch: Colors.indigo,
         scaffoldBackgroundColor: Colors.grey[50],
         appBarTheme: const AppBarTheme(
           elevation: 0,
