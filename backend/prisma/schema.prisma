@@ -57,6 +57,8 @@ model Post {
   imageUrl    String?
   category  String   @default("その他")
 
+  postType  String   @default("INDIVIDUAL") @map("post_type")
+
   comments  Comment[]                     // この投稿に付けられたコメント
 
   // 💡 post がどの「いいね」をしたか
