@@ -81,7 +81,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       appBar: AppBar(title: Text(author['displayName'] ?? '投稿')),
       body: Column(
         children: [
-          // --- 1. 投稿内容エリア（ここをExpandedで囲んでスクロール可能にする） ---
+          // --- 1. 投稿内容エリア ---
           Expanded(
             child: SingleChildScrollView(
               child: Column(
@@ -132,23 +132,25 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
                   // 💡 投稿画像があれば表示
                   if (_post['imageUrl'] != null) ...[
-                    // SizedBox(height: 10) は削除して、画像と本文を少し近づけるか、パディングで調整
                     Hero(
                       tag: _post['id'],
-                      child: Image(
-                        image: _getImageProvider(_post['imageUrl'])!,
-                        // ▼▼▼ 修正ポイント ▼▼▼
-                        fit: BoxFit.fitWidth, // 横幅に合わせて高さを自動調整（全体表示）
-                        width: double.infinity, // 横幅はいっぱいに
-                        // height: 250, // ❌ 高さは指定しない（削除）
+                      // ▼▼▼ InteractiveViewer で囲む（拡大縮小機能） ▼▼▼
+                      child: InteractiveViewer(
+                        minScale: 0.5,
+                        maxScale: 5.0,
+                        child: Image(
+                          image: _getImageProvider(_post['imageUrl'])!,
+                          fit: BoxFit.fitWidth, // 横幅に合わせて全体を表示
+                          width: double.infinity,
+                        ),
                       ),
+                      // ▲▲▲ 修正ここまで ▲▲▲
                     ),
                   ],
 
                   const Divider(),
 
                   // --- 2. コメント一覧 ---
-                  // SingleChildScrollViewの中にFutureBuilderを入れる形に変更
                   FutureBuilder<List<dynamic>>(
                     future: _commentsFuture,
                     builder: (context, snapshot) {
@@ -166,12 +168,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       }
 
                       final comments = snapshot.data!;
-                      // ListView.builderを使うとスクロールが競合するので、Column + map に展開するか
-                      // shrinkWrap: true, physics: NeverScrollableScrollPhysics を使う
                       return ListView.builder(
-                        shrinkWrap: true, // コンテンツの高さに合わせる
-                        physics:
-                            const NeverScrollableScrollPhysics(), // 親のスクロールに任せる
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
                         itemCount: comments.length,
                         itemBuilder: (context, index) {
                           final comment = comments[index];
@@ -264,14 +263,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       );
                     },
                   ),
-                  // 下部の入力欄とかぶらないように余白を追加
                   const SizedBox(height: 80),
                 ],
               ),
             ),
           ),
 
-          // --- 3. コメント入力欄 (画面下部に固定) ---
+          // --- 3. コメント入力欄 ---
           Container(
             decoration: BoxDecoration(
               color: Colors.white,
@@ -286,7 +284,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             ),
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
             child: SafeArea(
-              // iPhoneのホームバー対策
               child: Row(
                 children: [
                   Expanded(

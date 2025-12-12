@@ -1,7 +1,8 @@
-import 'dart:convert'; // 💡 Base64デコード用
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../utils/date_formatter.dart';
+import '../widgets/empty_state.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -13,7 +14,6 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final ApiService _apiService = ApiService();
 
-  // 💡 ExpansionTile を操作するためのコントローラー
   final ExpansionTileController _expansionController =
       ExpansionTileController();
 
@@ -24,11 +24,28 @@ class _SearchScreenState extends State<SearchScreen> {
   DateTime? _startDate;
   DateTime? _endDate;
 
+  // ▼▼▼ 追加: カテゴリー選択用 ▼▼▼
+  final List<String> _categories = [
+    '惣菜',
+    '精肉',
+    '青果',
+    '鮮魚',
+    'グロサリー',
+    'デイリー',
+    '生活',
+    'ライフスタイル',
+    'ソフト',
+    'ハード',
+    '家電',
+    'ペット',
+    '後方',
+  ];
+  String? _selectedCategory; // 選択されたカテゴリー (nullなら指定なし)
+
   List<dynamic> _searchResults = [];
   bool _isLoading = false;
   bool _hasSearched = false;
 
-  // 画像表示用ヘルパー
   ImageProvider? _getImageProvider(String? url) {
     if (url == null) return null;
     if (url.startsWith('data:')) {
@@ -61,12 +78,10 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _doSearch() async {
-    // 💡 検索実行時にアコーディオンを閉じる
     if (_expansionController.isExpanded) {
       _expansionController.collapse();
     }
 
-    // キーボードを閉じる
     FocusScope.of(context).unfocus();
 
     setState(() {
@@ -74,12 +89,14 @@ class _SearchScreenState extends State<SearchScreen> {
       _hasSearched = true;
     });
 
+    // ▼▼▼ 修正: カテゴリー(_selectedCategory)も渡す ▼▼▼
     final results = await _apiService.getPosts(
       displayName: _displayNameController.text,
       storeCode: _storeCodeController.text,
       keyword: _keywordController.text,
       startDate: _startDate,
       endDate: _endDate,
+      category: _selectedCategory, // 追加
     );
 
     if (mounted) {
@@ -97,6 +114,7 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() {
       _startDate = null;
       _endDate = null;
+      _selectedCategory = null; // カテゴリーもリセット
       _searchResults = [];
       _hasSearched = false;
     });
@@ -129,7 +147,6 @@ class _SearchScreenState extends State<SearchScreen> {
       body: Column(
         children: [
           ExpansionTile(
-            // 💡 コントローラーを紐付け
             controller: _expansionController,
             title: const Text('検索条件を入力'),
             initiallyExpanded: true,
@@ -138,6 +155,33 @@ class _SearchScreenState extends State<SearchScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
                 child: Column(
                   children: [
+                    // カテゴリー選択ドロップダウン (DropdownButtonFormFieldを使用)
+                    // ▼▼▼ 追加 ▼▼▼
+                    DropdownButtonFormField<String>(
+                      value: _selectedCategory,
+                      decoration: const InputDecoration(
+                        labelText: 'カテゴリー',
+                        prefixIcon: Icon(Icons.category, color: Colors.grey),
+                      ),
+                      items: [
+                        const DropdownMenuItem(
+                          value: null,
+                          child: Text('指定なし (すべて)'),
+                        ),
+                        ..._categories.map((String category) {
+                          return DropdownMenuItem(
+                            value: category,
+                            child: Text(category),
+                          );
+                        }),
+                      ],
+                      onChanged: (String? newValue) {
+                        setState(() {
+                          _selectedCategory = newValue;
+                        });
+                      },
+                    ),
+
                     Row(
                       children: [
                         Expanded(
@@ -183,6 +227,8 @@ class _SearchScreenState extends State<SearchScreen> {
                       label: const Text('検索する'),
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size(double.infinity, 40),
+                        backgroundColor: const Color(0xFF1A237E), // ネイビーに変更
+                        foregroundColor: Colors.white,
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -198,21 +244,31 @@ class _SearchScreenState extends State<SearchScreen> {
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : !_hasSearched
-                ? const Center(child: Text('条件を入力して検索してください'))
+                ? const EmptyState(
+                    title: '投稿を検索',
+                    message: 'カテゴリーやキーワードを指定して\n他の店舗の取り組みを探してみましょう',
+                    icon: Icons.search,
+                  )
                 : _searchResults.isEmpty
-                ? const Center(child: Text('該当する投稿はありません'))
+                ? const EmptyState(
+                    title: '見つかりませんでした',
+                    message: '条件を変更して再度お試しください',
+                    icon: Icons.sentiment_dissatisfied,
+                  )
                 : ListView.builder(
                     itemCount: _searchResults.length,
                     itemBuilder: (context, index) {
                       final post = _searchResults[index];
                       final author = post['author'];
+                      final String category =
+                          post['category'] ?? 'その他'; // カテゴリー取得
 
-                      // 💡 ListTile ではなく Card + Column でレイアウト
                       return Card(
                         margin: const EdgeInsets.symmetric(
                           horizontal: 10,
                           vertical: 5,
                         ),
+                        elevation: 2,
                         child: InkWell(
                           onTap: () {
                             Navigator.of(
@@ -224,7 +280,7 @@ class _SearchScreenState extends State<SearchScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // 1. ユーザー情報
+                                // 1. ユーザー情報 + カテゴリーラベル
                                 Row(
                                   children: [
                                     CircleAvatar(
@@ -237,13 +293,34 @@ class _SearchScreenState extends State<SearchScreen> {
                                           : null,
                                     ),
                                     const SizedBox(width: 8),
-                                    Text(
-                                      author?['displayName'] ?? '不明',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
+                                    Expanded(
+                                      child: Text(
+                                        author?['displayName'] ?? '不明',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
-                                    const Spacer(),
+                                    // ▼▼▼ カテゴリーラベル表示 ▼▼▼
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      margin: const EdgeInsets.only(right: 8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey[200],
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        category,
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          color: Colors.black54,
+                                        ),
+                                      ),
+                                    ),
                                     Text(
                                       DateFormatter.timeAgo(post['createdAt']),
                                       style: const TextStyle(

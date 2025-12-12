@@ -1,7 +1,6 @@
 import * as express from 'express';
 import prisma from '../lib/prisma';
 import { authenticateJWT, AuthRequest, authenticateJWT_Optional } from '../auth/auth.middleware';
-// ▼▼▼ 修正: { } をつけてインポートする ▼▼▼
 import { cloudinary } from '../lib/cloudinary';
 
 const userRouter = express.Router();
@@ -23,6 +22,7 @@ userRouter.get('/:username', authenticateJWT_Optional, async (req: AuthRequest, 
         displayName: true,
         storeCode: true,
         profileImageUrl: true,
+        interestedCategories: true, // 👈 追加
         createdAt: true,
         _count: {
           select: { 
@@ -44,7 +44,8 @@ userRouter.get('/:username', authenticateJWT_Optional, async (req: AuthRequest, 
       const follow = await prisma.follow.findUnique({
         where: {
           followerId_followingId: {
-            followerId: currentUserId,
+            // IDは文字列なのでそのまま使用
+            followerId: currentUserId, 
             followingId: user.id,
           },
         },
@@ -52,7 +53,7 @@ userRouter.get('/:username', authenticateJWT_Optional, async (req: AuthRequest, 
       isFollowing = !!follow;
     }
 
-    // ユーザーの投稿一覧も取得 (最新20件)
+    // ユーザーの投稿一覧も取得
     const posts = await prisma.post.findMany({
       where: { authorId: user.id },
       orderBy: { createdAt: 'desc' },
@@ -82,9 +83,18 @@ userRouter.get('/:username', authenticateJWT_Optional, async (req: AuthRequest, 
       _count: undefined,
     }));
 
+    // JSON文字列を配列に戻す
+    let categories = [];
+    try {
+      categories = JSON.parse(user.interestedCategories || '[]');
+    } catch (e) {
+      categories = [];
+    }
+
     res.json({
       user: {
         ...user,
+        interestedCategories: categories, // 👈 追加
         postCount: user._count.posts,
         followerCount: user._count.followedBy,
         followingCount: user._count.following,
@@ -103,7 +113,6 @@ userRouter.get('/:username', authenticateJWT_Optional, async (req: AuthRequest, 
 
 /**
  * GET /users/:username/following
- * 指定したユーザーがフォローしているユーザー一覧を取得
  */
 userRouter.get('/:username/following', authenticateJWT_Optional, async (req: AuthRequest, res) => {
   const { username } = req.params;
@@ -140,7 +149,7 @@ userRouter.get('/:username/following', authenticateJWT_Optional, async (req: Aut
 
 /**
  * PUT /users/me
- * 自分のプロフィール情報を更新 (Cloudinary対応版)
+ * プロフィール更新
  */
 userRouter.put('/me', authenticateJWT, async (req: AuthRequest, res) => {
   const userId = req.user?.id;
@@ -151,16 +160,12 @@ userRouter.put('/me', authenticateJWT, async (req: AuthRequest, res) => {
   try {
     let profileImageUrl: string | undefined;
 
-    // 💡 修正: 画像データ(Base64)がある場合、Cloudinaryにアップロードする
     if (profileImageBase64 && profileImageBase64.startsWith('data:image')) {
       try {
         const uploadResponse = await cloudinary.uploader.upload(profileImageBase64, {
-          folder: 'shainai_sns_profiles', // Cloudinary上のフォルダ名
-          transformation: [
-            { width: 400, height: 400, crop: 'fill' } // 正方形に自動トリミング
-          ],
+          folder: 'shainai_sns_profiles',
+          transformation: [{ width: 400, height: 400, crop: 'fill' }],
         });
-        // アップロード後のURLを取得
         profileImageUrl = uploadResponse.secure_url;
       } catch (uploadError) {
         console.error('Cloudinary upload error:', uploadError);
@@ -168,12 +173,10 @@ userRouter.put('/me', authenticateJWT, async (req: AuthRequest, res) => {
       }
     }
 
-    // データベースを更新
     const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: {
         displayName: displayName,
-        // 新しい画像URLがあれば更新、なければ何もしない(undefined)
         profileImageUrl: profileImageUrl, 
         storeCode: storeCode || undefined,
       },
@@ -189,6 +192,43 @@ userRouter.put('/me', authenticateJWT, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Update profile error:', error);
     res.status(500).json({ error: 'プロフィールの更新に失敗しました' });
+  }
+});
+
+/**
+ * PUT /users/:id/categories
+ * カテゴリー更新機能
+ */
+userRouter.put('/:id/categories', authenticateJWT, async (req: AuthRequest, res) => {
+  const targetUserId = req.params.id; // 文字列
+  const currentUserId = req.user?.id; // 文字列
+
+  // 文字列同士で比較
+  if (!currentUserId || targetUserId !== currentUserId) {
+    return res.status(403).json({ error: '権限がありません' });
+  }
+
+  const { categories } = req.body; 
+
+  if (!Array.isArray(categories)) {
+    return res.status(400).json({ error: 'カテゴリーはリスト形式で送信してください' });
+  }
+
+  try {
+    const updatedUser = await prisma.user.update({
+      where: { id: currentUserId },
+      data: {
+        interestedCategories: JSON.stringify(categories),
+      },
+    });
+
+    res.json({ 
+      status: 'success', 
+      interestedCategories: JSON.parse(updatedUser.interestedCategories || '[]') 
+    });
+  } catch (error) {
+    console.error('Update categories error:', error);
+    res.status(500).json({ error: 'カテゴリーの更新に失敗しました' });
   }
 });
 

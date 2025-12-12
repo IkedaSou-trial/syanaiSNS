@@ -45,10 +45,12 @@
 		<true/>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
 		<true/>
-		<key>NSPhotoLibraryUsageDescription</key>
-		<string>プロフィール画像を設定するためにライブラリにアクセスします。</string>
+		<key>CFBundleDisplayName</key>
+		<string>Toragram</string>
 		<key>NSCameraUsageDescription</key>
-		<string>バーコードの読み取りやプロフィール画像の撮影にカメラを使用します。</string>
+		<string>プロフィール画像を撮影するためにカメラを使用します。</string>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>プロフィール画像を設定するためにライブラリを使用します。</string>
 		<key>UIStatusBarHidden</key>
 		<false/>
 	</dict>

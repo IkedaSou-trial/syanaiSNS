@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../widgets/empty_state.dart';
 
 class RankingScreen extends StatefulWidget {
   const RankingScreen({super.key});
@@ -75,22 +76,10 @@ class _RankingScreenState extends State<RankingScreen> {
                 ? const Center(child: CircularProgressIndicator())
                 : _rankingPosts.isEmpty
                 // 💡 修正: データがない場合のメッセージを表示
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.emoji_events_outlined,
-                          size: 60,
-                          color: Colors.grey[300],
-                        ),
-                        const SizedBox(height: 16),
-                        const Text(
-                          '集計期間中の投稿はありません',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      ],
-                    ),
+                ? const EmptyState(
+                    title: 'ランクインした投稿はありません',
+                    message: '「いいね」をたくさんもらうと\nここに表示されます',
+                    icon: Icons.emoji_events_outlined,
                   )
                 : ListView.builder(
                     itemCount: _rankingPosts.length,

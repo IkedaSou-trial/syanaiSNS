@@ -5,35 +5,16 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiService {
-  // プラットフォーム（OS）に応じてベースURLを自動で切り替えます
-
   String get _baseUrl {
-    // 👇 Renderで発行されたURLをここに貼る (末尾の / は無し)
+    // 👇 RenderのURL
     const String productionUrl =
         "https://unferreted-campbell-hypermetaphorical.ngrok-free.dev";
-
-    // 実機でもエミュレータでも、常に本番サーバーを使う
     return productionUrl;
-
-    // // 例: "http://192.168.1.15:3000" (最後の :3000 はポート番号なので残す)
-    // const String ngrokUrl =
-    //     "https://unferreted-campbell-hypermetaphorical.ngrok-free.dev"; // <-- ここにあなたの PCのIPアドレス または ngrok URL を入れてください
-    // if (Platform.isAndroid) {
-    //   //return pcIpAddress;
-    //   return "http://10.0.2.2:3000"; // Androidエミュレータ
-    // } else if (Platform.isIOS) {
-    //   return ngrokUrl.trim(); // iOSシミュレータ
-    //   //return "http://localhost:3000"; // iOSシミュレータ（実機の場合はPCのIPアドレスに変更する必要あり）
-    // } else {
-    //   return "http://localhost:3000"; // Webやデスクトップなど
-    // }
   }
 
   String get baseUrl => _baseUrl;
-
   final _storage = const FlutterSecureStorage();
 
-  // ヘッダーを生成するヘルパー
   Future<Map<String, String>> _getHeaders({bool needsAuth = false}) async {
     final headers = <String, String>{
       'Content-Type': 'application/json',
@@ -48,47 +29,43 @@ class ApiService {
     return headers;
   }
 
-  // --- 🆕 バーコードログイン API ---
-  Future<dynamic> loginWithBarcode(String barcode) async {
+  // --- 🆕 バーコードログイン ---
+  Future<Map<String, dynamic>?> loginWithBarcode(String barcode) async {
     try {
-      print('API呼び出し: バーコードログイン ($barcode)');
-
-      // ngrok または PCのIPアドレスを設定
-      // ※ここにあなたの ngrok URL または IPアドレスを入れてください
-      final url = Uri.parse('$_baseUrl/auth/login/barcode');
-
-      print("url: $url");
-      print("Headers: ${await _getHeaders()}");
-      print("Request body: ${jsonEncode({'barcode': barcode})}");
       final response = await http.post(
-        url,
+        Uri.parse('$_baseUrl/auth/login/barcode'),
         headers: await _getHeaders(),
         body: jsonEncode({'barcode': barcode}),
       );
 
-      print('Response status: ${response.statusCode}');
-      print('Response body: ${response.body}');
+      final data = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final token = data['token'];
-        await _storage.write(key: 'jwt_token', value: token);
-
-        // 成功時はユーザー情報(Map)を返す
-        return data['user'];
-      } else {
-        // 失敗時はサーバーからのエラーメッセージ(String)を返す
-        return 'サーバーエラー (${response.statusCode}):\n${response.body}';
+        if (data['status'] == 'success') {
+          await _storage.write(key: 'jwt_token', value: data['token']);
+          // ▼▼▼ 追加: ユーザー名を保存 ▼▼▼
+          if (data['user'] != null && data['user']['username'] != null) {
+            await _storage.write(
+              key: 'current_username',
+              value: data['user']['username'],
+            );
+          }
+          return {'status': 'success', 'user': data['user']};
+        } else if (data['status'] == 'unregistered') {
+          return {'status': 'unregistered', 'userData': data['userData']};
+        }
       }
+      return {'status': 'error', 'message': data['error'] ?? 'エラーが発生しました'};
     } catch (e) {
-      // 通信エラーなどの例外も文字列として返す
-      print('Login error: $e');
-      return '通信エラーが発生しました:\n$e';
+      return {'status': 'error', 'message': '通信エラー: $e'};
     }
   }
 
-  // --- (旧) ID/PASSログイン API ---
-  Future<bool> login(String username, String password) async {
+  // --- 🆕 手動ログイン ---
+  Future<Map<String, dynamic>?> loginManual(
+    String username,
+    String password,
+  ) async {
     try {
       final response = await http.post(
         Uri.parse('$_baseUrl/auth/login'),
@@ -98,71 +75,73 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final token = data['token'];
-        await _storage.write(key: 'jwt_token', value: token);
-        return true;
-      } else {
-        return false;
+        await _storage.write(key: 'jwt_token', value: data['token']);
+        // ▼▼▼ 追加: ユーザー名を保存 ▼▼▼
+        if (data['user'] != null && data['user']['username'] != null) {
+          await _storage.write(
+            key: 'current_username',
+            value: data['user']['username'],
+          );
+        }
+        return data['user'];
       }
+      return null;
     } catch (e) {
-      return false;
+      return null;
     }
   }
 
-  // --- 2. 投稿一覧の取得 API ---
-  Future<List<dynamic>> getPosts({
-    String? displayName,
-    String? storeCode,
-    String? keyword,
-    DateTime? startDate,
-    DateTime? endDate,
-    bool onlyFollowing = false,
-  }) async {
+  // --- ▼▼▼ 新規追加: 保存されたユーザー名からプロフィールを取得する ▼▼▼ ---
+  Future<Map<String, dynamic>?> fetchCurrentUser() async {
     try {
-      final queryParams = <String, String>{};
-      if (displayName != null) queryParams['displayName'] = displayName;
-      if (storeCode != null) queryParams['storeCode'] = storeCode;
-      if (keyword != null) queryParams['keyword'] = keyword;
-      if (startDate != null)
-        queryParams['startDate'] = startDate.toIso8601String().split('T')[0];
-      if (endDate != null)
-        queryParams['endDate'] = endDate.toIso8601String().split('T')[0];
-      if (onlyFollowing) queryParams['onlyFollowing'] = 'true';
+      // 保存しておいたユーザー名を読み込む
+      final username = await _storage.read(key: 'current_username');
+      if (username == null) return null;
 
-      final uri = Uri.parse(
-        '$_baseUrl/posts',
-      ).replace(queryParameters: queryParams);
+      // プロフィール取得APIを呼ぶ
+      return await getUserProfile(username);
+    } catch (e) {
+      print('Fetch current user error: $e');
+      return null;
+    }
+  }
 
-      final response = await http.get(
-        uri,
-        headers: await _getHeaders(needsAuth: true),
+  // --- 🆕 新規登録 ---
+  Future<Map<String, dynamic>?> signup(
+    String username,
+    String password,
+    String displayName,
+    String storeCode,
+  ) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/auth/signup'),
+        headers: await _getHeaders(),
+        body: jsonEncode({
+          'username': username,
+          'password': password,
+          'displayName': displayName,
+          'storeCode': storeCode,
+        }),
       );
 
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body) as List<dynamic>;
-      } else {
-        return [];
+      if (response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+        await _storage.write(key: 'jwt_token', value: data['token']);
+        return data['user'];
       }
+      return null;
     } catch (e) {
-      return [];
+      return null;
     }
   }
 
-  // --- 3. 投稿作成 API (旧シグネチャ互換用) ---
-  // CreatePostScreenから呼ばれる可能性があるため残します
-  Future<bool> createPost(
-    String content, {
-    String? title,
-    String? base64Image,
-  }) async {
-    return false; // 使わない
-  }
-
-  // --- 3b. 投稿作成 API (画像ファイル送信対応) ---
+  // --- 3. 投稿作成 API (画像付き対応版) ---
   Future<bool> createPostWithFile(
     String content, {
     String? title,
     File? imageFile,
+    String category = 'その他',
   }) async {
     try {
       var request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/posts'));
@@ -171,6 +150,7 @@ class ApiService {
 
       request.fields['content'] = content;
       if (title != null) request.fields['title'] = title;
+      request.fields['category'] = category;
 
       if (imageFile != null) {
         var stream = http.ByteStream(imageFile.openRead());
@@ -188,6 +168,46 @@ class ApiService {
       return response.statusCode == 201;
     } catch (e) {
       return false;
+    }
+  }
+
+  // --- 1. 投稿一覧の取得 API ---
+  Future<List<dynamic>> getPosts({
+    String? displayName,
+    String? storeCode,
+    String? keyword,
+    DateTime? startDate,
+    DateTime? endDate,
+    bool onlyFollowing = false,
+    String? category,
+  }) async {
+    try {
+      final queryParams = <String, String>{};
+      if (displayName != null) queryParams['displayName'] = displayName;
+      if (storeCode != null) queryParams['storeCode'] = storeCode;
+      if (keyword != null) queryParams['keyword'] = keyword;
+      if (startDate != null)
+        queryParams['startDate'] = startDate.toIso8601String().split('T')[0];
+      if (endDate != null)
+        queryParams['endDate'] = endDate.toIso8601String().split('T')[0];
+      if (onlyFollowing) queryParams['onlyFollowing'] = 'true';
+      if (category != null) queryParams['category'] = category;
+
+      final uri = Uri.parse(
+        '$_baseUrl/posts',
+      ).replace(queryParameters: queryParams);
+      final response = await http.get(
+        uri,
+        headers: await _getHeaders(needsAuth: true),
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as List<dynamic>;
+      } else {
+        return [];
+      }
+    } catch (e) {
+      return [];
     }
   }
 
@@ -222,7 +242,7 @@ class ApiService {
     }
   }
 
-  // --- コメント削除 (PostDetailScreenで使用) ---
+  // --- コメント削除 ---
   Future<bool> deleteComment(String postId, String commentId) async {
     try {
       final response = await http.delete(
@@ -278,7 +298,7 @@ class ApiService {
     }
   }
 
-  // --- プロフィール関連 (ProfileScreenで使用) ---
+  // --- プロフィール関連 ---
   Future<Map<String, dynamic>?> getUserProfile(String username) async {
     try {
       final response = await http.get(
@@ -295,7 +315,7 @@ class ApiService {
     }
   }
 
-  // --- プロフィール更新 (EditProfileScreenで使用) ---
+  // --- プロフィール更新 ---
   Future<bool> updateProfile(
     String displayName,
     String? base64Image,
@@ -320,32 +340,7 @@ class ApiService {
     }
   }
 
-  // --- アカウント作成 (SignUpScreenで使用) ---
-  // ※店舗アカウント化に伴い不要ですが、エラー回避のために残します
-  Future<bool> signup(
-    String username,
-    String password,
-    String displayName,
-    String storeCode,
-  ) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$_baseUrl/auth/signup'),
-        headers: await _getHeaders(),
-        body: jsonEncode({
-          'username': username,
-          'password': password,
-          'displayName': displayName,
-          'storeCode': storeCode,
-        }),
-      );
-      return response.statusCode == 201;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  // --- フォロー関連 (UserListScreen, ProfileScreenで使用) ---
+  // --- フォロー関連 ---
   Future<bool> followUser(String userId) async {
     try {
       final response = await http.post(
@@ -402,20 +397,45 @@ class ApiService {
       return [];
     }
   }
-  // --- 未読管理用のメソッド ---
 
-  // 最後に見た時間を保存する
+  // --- 未読管理用のメソッド ---
   Future<void> saveLastReadTime(String key) async {
     final now = DateTime.now().toIso8601String();
     await _storage.write(key: 'last_read_$key', value: now);
   }
 
-  // 最後に見た時間を取得する
   Future<DateTime?> getLastReadTime(String key) async {
     final timeStr = await _storage.read(key: 'last_read_$key');
     if (timeStr != null) {
       return DateTime.tryParse(timeStr);
     }
-    return null; // まだ保存されていない場合（初回など）
+    return null;
+  }
+
+  // --- カテゴリー更新 ---
+  Future<bool> updateCategories(String userId, List<String> categories) async {
+    final token = await _storage.read(key: 'jwt_token');
+    if (token == null) return false;
+
+    try {
+      final response = await http.put(
+        Uri.parse('$_baseUrl/users/$userId/categories'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'categories': categories}),
+      );
+
+      if (response.statusCode == 200) {
+        return true;
+      } else {
+        print('Category update failed: ${response.body}');
+        return false;
+      }
+    } catch (e) {
+      print('Category update error: $e');
+      return false;
+    }
   }
 }

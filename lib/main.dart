@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'screens/login_screen.dart';
-import 'screens/main_screen.dart'; // MainScreenをインポート
+import 'screens/main_screen.dart';
 import 'screens/create_post_screen.dart';
 import 'screens/post_detail_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/category_selection_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -16,27 +18,51 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: '店舗VMD共有',
+      title: 'Toragram',
       theme: ThemeData(
         primarySwatch: Colors.indigo,
         scaffoldBackgroundColor: Colors.grey[50],
+
+        // フォント設定
+        textTheme: GoogleFonts.notoSansJpTextTheme(Theme.of(context).textTheme),
+
         appBarTheme: const AppBarTheme(
           elevation: 0,
           backgroundColor: Colors.white,
           foregroundColor: Colors.black,
         ),
+
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.indigo,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+
+        // ▼▼▼ 追加: SnackBar（通知バー）のデザイン設定 ▼▼▼
+        snackBarTheme: SnackBarThemeData(
+          behavior: SnackBarBehavior.floating, // 浮かせる
+          backgroundColor: Colors.grey[900], // 濃いグレー
+          contentTextStyle: const TextStyle(color: Colors.white),
+          shape: RoundedRectangleBorder(
+            // 角丸にする
+            borderRadius: BorderRadius.circular(8),
+          ),
+          insetPadding: const EdgeInsets.all(16), // 画面端からの余白
+        ),
+        // ▲▲▲ 追加ここまで ▲▲▲
       ),
       initialRoute: '/login',
       routes: {
         '/login': (context) => const LoginScreen(),
         '/create_post': (context) => const CreatePostScreen(),
-        // ⚠️ 重要: ここに '/home': ... があると下部タブが表示されません。
-        // 必ず onGenerateRoute 側に任せるために削除してください。
+        '/category_selection': (context) => const CategorySelectionScreen(),
       },
       onGenerateRoute: (settings) {
-        // '/home' に遷移する時、ここが呼ばれます
         if (settings.name == '/home') {
-          // ログイン画面から渡されたユーザー情報を受け取る
           final currentUser =
               settings.arguments as Map<String, dynamic>? ??
               {
@@ -46,7 +72,6 @@ class MyApp extends StatelessWidget {
               };
 
           return MaterialPageRoute(
-            // ここで MainScreen（下部タブ付き）を表示します
             builder: (context) => MainScreen(currentUser: currentUser),
           );
         }

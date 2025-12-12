@@ -3,6 +3,7 @@ import 'package:like_button/like_button.dart';
 import '../services/api_service.dart';
 import 'dart:convert';
 import '../utils/date_formatter.dart';
+import '../widgets/post_skeleton.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,9 +21,13 @@ class _HomeScreenState extends State<HomeScreen>
   bool _isLoading = true;
 
   late TabController _tabController;
-
-  // バッジフラグ (初期値は false に変更)
   bool _hasNewFollowing = false;
+
+  Map<String, dynamic>? _currentUser;
+  bool _isInit = true;
+
+  // ▼▼▼ 追加: 自分の投稿を表示するかどうかのフラグ ▼▼▼
+  bool _showMyPosts = false; // デフォルトはOFF（厳格なフィルター）
 
   @override
   void initState() {
@@ -30,34 +35,41 @@ class _HomeScreenState extends State<HomeScreen>
     _tabController = TabController(length: 2, vsync: this);
 
     _tabController.addListener(() {
-      // 「フォロー中」タブ（インデックス1）が選ばれたら
       if (!_tabController.indexIsChanging && _tabController.index == 1) {
         setState(() {
-          _hasNewFollowing = false; // バッジを消す
+          _hasNewFollowing = false;
         });
-        // 💡 修正: 見た時間を保存する
         _apiService.saveLastReadTime('following');
       }
     });
-
-    _refreshPosts();
   }
 
-  // 💡 追加: 未読チェックロジック
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_isInit) {
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args != null && args is Map<String, dynamic>) {
+        _currentUser = args;
+        print("📲 引数からユーザー情報を取得しました");
+      } else {
+        print("⚠️ 引数がありません。APIからユーザー情報を取得します...");
+      }
+      _refreshPosts();
+      _isInit = false;
+    }
+  }
+
   Future<void> _checkUnreadStatus(List<dynamic> posts) async {
     if (posts.isEmpty) return;
-
-    // 最新の投稿の日時を取得
-    final latestPostTimeStr = posts.first['createdAt']; // リストは降順なので先頭が最新
+    final latestPostTimeStr = posts.first['createdAt'];
     if (latestPostTimeStr == null) return;
 
     final latestPostTime = DateTime.tryParse(latestPostTimeStr);
     if (latestPostTime == null) return;
 
-    // 保存されている「最後に見た時間」を取得
     final lastReadTime = await _apiService.getLastReadTime('following');
 
-    // 「最後に見た時間がない（初回）」または「最新投稿の方が新しい」場合にバッジをつける
     if (lastReadTime == null || latestPostTime.isAfter(lastReadTime)) {
       if (mounted) {
         setState(() {
@@ -68,22 +80,55 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _refreshPosts() async {
-    // ローディング中もバッジの状態は維持したいので、ここではフラグをリセットしない
+    if (_currentUser == null) {
+      final fullProfileData = await _apiService.fetchCurrentUser();
+      if (fullProfileData != null && fullProfileData['user'] != null) {
+        _currentUser = fullProfileData['user'];
+        print("🔄 APIからユーザー情報を復元しました");
+      }
+    }
 
     final results = await Future.wait([
       _apiService.getPosts(),
       _apiService.getPosts(onlyFollowing: true),
     ]);
 
+    List<dynamic> allPosts = results[0];
+
+    // フィルター処理
+    if (_currentUser != null) {
+      final rawCategories = _currentUser!['interestedCategories'];
+
+      if (rawCategories != null &&
+          rawCategories is List &&
+          rawCategories.isNotEmpty) {
+        final List<String> myCategories = rawCategories
+            .map((e) => e.toString())
+            .toList();
+        print("🔎 フィルター実行: $myCategories (自分の投稿を表示: $_showMyPosts)");
+
+        allPosts = allPosts.where((post) {
+          final String postCategory = post['category'] ?? 'その他';
+          final bool isMine = post['isMine'] ?? false;
+
+          // ▼▼▼ 修正: スイッチがONなら自分の投稿は無条件で表示 ▼▼▼
+          if (_showMyPosts && isMine) return true;
+
+          // それ以外はカテゴリーで判定
+          return myCategories.contains(postCategory);
+        }).toList();
+
+        print("✅ フィルター完了: 残り${allPosts.length}件");
+      }
+    }
+
     if (mounted) {
       setState(() {
-        _posts = results[0];
+        _posts = allPosts;
         _followingPosts = results[1];
         _isLoading = false;
       });
 
-      // 💡 修正: データの取得が終わったら、未読チェックを行う
-      // もし現在「フォロー中タブ」を開いているなら、チェックせずに既読にする
       if (_tabController.index == 1) {
         _apiService.saveLastReadTime('following');
       } else {
@@ -92,7 +137,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  // 投稿削除処理
+  // ... (省略: _deletePostProcess, _getImageProvider, _buildPostList は変更なし) ...
   Future<void> _deletePostProcess(String postId) async {
     final shouldDelete = await showDialog<bool>(
       context: context,
@@ -142,10 +187,40 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildPostList(List<dynamic> targetPosts) {
     if (_isLoading && targetPosts.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return ListView.builder(
+        itemCount: 5,
+        itemBuilder: (context, index) => const PostSkeleton(),
+      );
     }
     if (targetPosts.isEmpty) {
-      return const Center(child: Text('投稿はありません'));
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.filter_list_off, size: 48, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text('表示する投稿がありません'),
+            if (_currentUser != null &&
+                (_currentUser!['interestedCategories'] as List? ?? [])
+                    .isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Text(
+                  '選択中のカテゴリー: ${_currentUser!['interestedCategories'].join(', ')}',
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+              ),
+            if (!_showMyPosts)
+              const Padding(
+                padding: EdgeInsets.only(top: 4.0),
+                child: Text(
+                  '(右上のスイッチで自分の投稿を表示できます)',
+                  style: TextStyle(color: Colors.grey, fontSize: 10),
+                ),
+              ),
+          ],
+        ),
+      );
     }
 
     return RefreshIndicator(
@@ -155,11 +230,11 @@ class _HomeScreenState extends State<HomeScreen>
         itemBuilder: (context, index) {
           final post = targetPosts[index];
           final author = post['author'];
-
           final int likeCount = post['likeCount'] ?? 0;
           final bool isLikedByMe = post['isLikedByMe'] ?? false;
           final int commentCount = post['commentCount'] ?? 0;
           final bool isMine = post['isMine'] ?? false;
+          final String category = post['category'] ?? 'その他';
 
           return InkWell(
             onTap: () {
@@ -179,7 +254,6 @@ class _HomeScreenState extends State<HomeScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ヘッダー
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -232,25 +306,42 @@ class _HomeScreenState extends State<HomeScreen>
                             ),
                           ],
                         ),
-                        if (isMine)
-                          IconButton(
-                            icon: const Icon(
-                              Icons.more_horiz,
-                              color: Colors.grey,
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[200],
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                category,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.black54,
+                                ),
+                              ),
                             ),
-                            onPressed: () => _deletePostProcess(post['id']),
-                          ),
+                            if (isMine)
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.more_horiz,
+                                  color: Colors.grey,
+                                ),
+                                onPressed: () => _deletePostProcess(post['id']),
+                              ),
+                          ],
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
-
-                    // 本文
                     Text(
                       post['content'] ?? '',
                       style: const TextStyle(fontSize: 15, height: 1.4),
                     ),
-
-                    // 画像
                     if (post['imageUrl'] != null) ...[
                       const SizedBox(height: 12),
                       Hero(
@@ -267,8 +358,6 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                     ],
                     const SizedBox(height: 12),
-
-                    // アクションボタンエリア
                     Row(
                       children: [
                         LikeButton(
@@ -298,9 +387,7 @@ class _HomeScreenState extends State<HomeScreen>
                             return success ? !isLiked : isLiked;
                           },
                         ),
-
                         const SizedBox(width: 24),
-
                         Row(
                           children: [
                             const Icon(
@@ -344,6 +431,52 @@ class _HomeScreenState extends State<HomeScreen>
         elevation: 0,
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
+        actions: [
+          // ▼▼▼ 追加: カテゴリー変更ボタン ▼▼▼
+          IconButton(
+            icon: const Icon(Icons.tune), // 調節つまみアイコン
+            tooltip: '表示カテゴリーを変更',
+            onPressed: () async {
+              // カテゴリー選択画面を開き、戻ってくるのを待つ
+              final updatedUser = await Navigator.of(context).pushNamed(
+                '/category_selection',
+                arguments: _currentUser, // 今の設定を渡す
+              );
+
+              // もし更新されて帰ってきたら、画面を更新する
+              if (updatedUser != null && updatedUser is Map<String, dynamic>) {
+                setState(() {
+                  _currentUser = updatedUser;
+                });
+                _refreshPosts(); // リストを再取得してフィルターし直す
+              }
+            },
+          ),
+
+          // ▼▼▼ 既存: 自分の投稿スイッチ ▼▼▼
+          Row(
+            children: [
+              const Text(
+                '自分の投稿',
+                style: TextStyle(fontSize: 10, color: Colors.black54),
+              ),
+              Transform.scale(
+                scale: 0.8, // スイッチを少し小さく
+                child: Switch(
+                  value: _showMyPosts,
+                  activeColor: Colors.blue[800],
+                  onChanged: (value) {
+                    setState(() {
+                      _showMyPosts = value;
+                    });
+                    _refreshPosts();
+                  },
+                ),
+              ),
+              const SizedBox(width: 4),
+            ],
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           labelColor: Colors.blue[800],
@@ -351,14 +484,12 @@ class _HomeScreenState extends State<HomeScreen>
           indicatorColor: Colors.blue[800],
           tabs: [
             const Tab(text: 'おすすめ'),
-            // 💡 修正3: 変数を使ってバッジの表示/非表示を切り替える
             Tab(
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Text('フォロー中'),
                   if (_hasNewFollowing) ...[
-                    // 変数がtrueの時だけ表示
                     const SizedBox(width: 8),
                     const Badge(smallSize: 8, backgroundColor: Colors.red),
                   ],
