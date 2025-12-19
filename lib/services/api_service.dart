@@ -1,112 +1,77 @@
 import 'dart:convert';
-import 'dart:io' show Platform;
-import 'dart:io' show File;
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiService {
-  String get _baseUrl {
-    // 👇 RenderのURL
-    const String productionUrl =
-        "https://unferreted-campbell-hypermetaphorical.ngrok-free.dev";
-    return productionUrl;
-  }
+  // ▼▼▼ 変更: static const にして、外部から ApiService.baseUrl で呼べるようにしました ▼▼▼
+  // ※ ngrokを再起動した場合は、ここを新しいURLに書き換えてください
+  static const String baseUrl =
+      "https://unferreted-campbell-hypermetaphorical.ngrok-free.dev";
 
-  String get baseUrl => _baseUrl;
   final _storage = const FlutterSecureStorage();
 
+  // ヘッダー取得
   Future<Map<String, String>> _getHeaders({bool needsAuth = false}) async {
     final headers = <String, String>{
       'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': 'true',
+      'ngrok-skip-browser-warning': 'true', // ngrok対策
     };
+
     if (needsAuth) {
       final token = await _storage.read(key: 'jwt_token');
-      if (token != null) {
+      if (token != null && token.isNotEmpty) {
         headers['Authorization'] = 'Bearer $token';
       }
     }
     return headers;
   }
 
-  // --- 🆕 バーコードログイン ---
-  Future<Map<String, dynamic>?> loginWithBarcode(String barcode) async {
+  // --- 投稿作成 ---
+  Future<bool> createPost(
+    String content,
+    String? imageBase64, {
+    String? title,
+    String category = 'その他',
+    String postType = 'INDIVIDUAL',
+  }) async {
     try {
+      final body = {
+        'content': content,
+        'category': category,
+        'postType': postType,
+        if (title != null) 'title': title,
+        if (imageBase64 != null) 'imageBase64': imageBase64,
+      };
+
       final response = await http.post(
-        Uri.parse('$_baseUrl/auth/login/barcode'),
-        headers: await _getHeaders(),
-        body: jsonEncode({'barcode': barcode}),
+        Uri.parse('$baseUrl/posts'), // $_baseUrl ではなく $baseUrl を使用
+        headers: await _getHeaders(needsAuth: true),
+        body: jsonEncode(body),
       );
 
-      final data = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        if (data['status'] == 'success') {
-          await _storage.write(key: 'jwt_token', value: data['token']);
-          // ▼▼▼ 追加: ユーザー名を保存 ▼▼▼
-          if (data['user'] != null && data['user']['username'] != null) {
-            await _storage.write(
-              key: 'current_username',
-              value: data['user']['username'],
-            );
-          }
-          return {'status': 'success', 'user': data['user']};
-        } else if (data['status'] == 'unregistered') {
-          return {'status': 'unregistered', 'userData': data['userData']};
-        }
-      }
-      return {'status': 'error', 'message': data['error'] ?? 'エラーが発生しました'};
+      return response.statusCode == 201;
     } catch (e) {
-      return {'status': 'error', 'message': '通信エラー: $e'};
+      print('投稿作成エラー: $e');
+      return false;
     }
   }
 
-  // --- 🆕 手動ログイン ---
-  Future<Map<String, dynamic>?> loginManual(
-    String username,
-    String password,
-  ) async {
+  // --- ユーザー存在確認 ---
+  Future<Map<String, dynamic>?> checkUserExists(String username) async {
     try {
       final response = await http.post(
-        Uri.parse('$_baseUrl/auth/login'),
+        Uri.parse('$baseUrl/auth/check-user'),
         headers: await _getHeaders(),
-        body: jsonEncode({'username': username, 'password': password}),
+        body: jsonEncode({'username': username}),
       );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        await _storage.write(key: 'jwt_token', value: data['token']);
-        // ▼▼▼ 追加: ユーザー名を保存 ▼▼▼
-        if (data['user'] != null && data['user']['username'] != null) {
-          await _storage.write(
-            key: 'current_username',
-            value: data['user']['username'],
-          );
-        }
-        return data['user'];
-      }
+      if (response.statusCode == 200) return jsonDecode(response.body);
       return null;
     } catch (e) {
       return null;
     }
   }
 
-  // --- ▼▼▼ 新規追加: 保存されたユーザー名からプロフィールを取得する ▼▼▼ ---
-  Future<Map<String, dynamic>?> fetchCurrentUser() async {
-    try {
-      // 保存しておいたユーザー名を読み込む
-      final username = await _storage.read(key: 'current_username');
-      if (username == null) return null;
-
-      // プロフィール取得APIを呼ぶ
-      return await getUserProfile(username);
-    } catch (e) {
-      print('Fetch current user error: $e');
-      return null;
-    }
-  }
-
-  // --- 🆕 新規登録 ---
+  // --- 新規登録 ---
   Future<Map<String, dynamic>?> signup(
     String username,
     String password,
@@ -115,7 +80,7 @@ class ApiService {
   ) async {
     try {
       final response = await http.post(
-        Uri.parse('$_baseUrl/auth/signup'),
+        Uri.parse('$baseUrl/auth/signup'),
         headers: await _getHeaders(),
         body: jsonEncode({
           'username': username,
@@ -124,10 +89,15 @@ class ApiService {
           'storeCode': storeCode,
         }),
       );
-
       if (response.statusCode == 201) {
         final data = jsonDecode(response.body);
-        await _storage.write(key: 'jwt_token', value: data['token']);
+        if (data['token'] != null)
+          await _storage.write(key: 'jwt_token', value: data['token']);
+        if (data['user']?['username'] != null)
+          await _storage.write(
+            key: 'current_username',
+            value: data['user']['username'],
+          );
         return data['user'];
       }
       return null;
@@ -136,42 +106,46 @@ class ApiService {
     }
   }
 
-  // --- 3. 投稿作成 API (画像付き対応版) ---
-  Future<bool> createPostWithFile(
-    String content, {
-    String? title,
-    File? imageFile,
-    String category = 'その他',
-  }) async {
+  // --- 手動ログイン ---
+  Future<Map<String, dynamic>?> loginManual(
+    String username,
+    String password,
+  ) async {
     try {
-      var request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/posts'));
-      final headers = await _getHeaders(needsAuth: true);
-      request.headers.addAll(headers);
-
-      request.fields['content'] = content;
-      if (title != null) request.fields['title'] = title;
-      request.fields['category'] = category;
-
-      if (imageFile != null) {
-        var stream = http.ByteStream(imageFile.openRead());
-        var length = await imageFile.length();
-        var multipartFile = http.MultipartFile(
-          'image',
-          stream,
-          length,
-          filename: imageFile.path.split('/').last,
-        );
-        request.files.add(multipartFile);
+      final response = await http.post(
+        Uri.parse('$baseUrl/auth/login'),
+        headers: await _getHeaders(),
+        body: jsonEncode({'username': username, 'password': password}),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['token'] != null)
+          await _storage.write(key: 'jwt_token', value: data['token']);
+        if (data['user']?['username'] != null)
+          await _storage.write(
+            key: 'current_username',
+            value: data['user']['username'],
+          );
+        return data['user'];
       }
-
-      var response = await request.send();
-      return response.statusCode == 201;
+      return null;
     } catch (e) {
-      return false;
+      return null;
     }
   }
 
-  // --- 1. 投稿一覧の取得 API ---
+  // --- プロフィール取得 ---
+  Future<Map<String, dynamic>?> fetchCurrentUser() async {
+    try {
+      final username = await _storage.read(key: 'current_username');
+      if (username == null) return null;
+      return await getUserProfile(username);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // --- 投稿一覧取得 ---
   Future<List<dynamic>> getPosts({
     String? displayName,
     String? storeCode,
@@ -180,6 +154,8 @@ class ApiService {
     DateTime? endDate,
     bool onlyFollowing = false,
     String? category,
+    String? filterType,
+    String? tag,
   }) async {
     try {
       final queryParams = <String, String>{};
@@ -192,66 +168,22 @@ class ApiService {
         queryParams['endDate'] = endDate.toIso8601String().split('T')[0];
       if (onlyFollowing) queryParams['onlyFollowing'] = 'true';
       if (category != null) queryParams['category'] = category;
+      if (filterType != null) queryParams['filterType'] = filterType;
+      if (tag != null) queryParams['tag'] = tag;
 
       final uri = Uri.parse(
-        '$_baseUrl/posts',
+        '$baseUrl/posts',
       ).replace(queryParameters: queryParams);
       final response = await http.get(
         uri,
         headers: await _getHeaders(needsAuth: true),
       );
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200)
         return jsonDecode(response.body) as List<dynamic>;
-      } else {
-        return [];
-      }
+      return [];
     } catch (e) {
       return [];
-    }
-  }
-
-  // --- 4. コメント一覧の取得 API ---
-  Future<List<dynamic>> getComments(String postId) async {
-    try {
-      final response = await http.get(
-        Uri.parse('$_baseUrl/posts/$postId/comments'),
-        headers: await _getHeaders(needsAuth: true),
-      );
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body) as List<dynamic>;
-      } else {
-        return [];
-      }
-    } catch (e) {
-      return [];
-    }
-  }
-
-  // --- 5. コメントの作成 API ---
-  Future<bool> createComment(String postId, String content) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$_baseUrl/posts/$postId/comments'),
-        headers: await _getHeaders(needsAuth: true),
-        body: jsonEncode({'content': content}),
-      );
-      return response.statusCode == 201;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  // --- コメント削除 ---
-  Future<bool> deleteComment(String postId, String commentId) async {
-    try {
-      final response = await http.delete(
-        Uri.parse('$_baseUrl/posts/$postId/comments/$commentId'),
-        headers: await _getHeaders(needsAuth: true),
-      );
-      return response.statusCode == 200;
-    } catch (e) {
-      return false;
     }
   }
 
@@ -261,24 +193,14 @@ class ApiService {
     await _storage.delete(key: 'current_user_name');
   }
 
-  // --- いいね関連 ---
-  Future<bool> likePost(String postId) async {
+  // --- リアクション (いいね / 真似したい) ---
+  // type: 'LIKE' または 'COPY'
+  Future<bool> toggleReaction(String postId, String type) async {
     try {
       final response = await http.post(
-        Uri.parse('$_baseUrl/posts/$postId/like'),
+        Uri.parse('$baseUrl/posts/$postId/reaction'),
         headers: await _getHeaders(needsAuth: true),
-      );
-      return response.statusCode == 201;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  Future<bool> unlikePost(String postId) async {
-    try {
-      final response = await http.delete(
-        Uri.parse('$_baseUrl/posts/$postId/like'),
-        headers: await _getHeaders(needsAuth: true),
+        body: jsonEncode({'type': type}),
       );
       return response.statusCode == 200;
     } catch (e) {
@@ -286,10 +208,11 @@ class ApiService {
     }
   }
 
+  // --- 投稿削除 ---
   Future<bool> deletePost(String postId) async {
     try {
       final response = await http.delete(
-        Uri.parse('$_baseUrl/posts/$postId'),
+        Uri.parse('$baseUrl/posts/$postId'),
         headers: await _getHeaders(needsAuth: true),
       );
       return response.statusCode == 200;
@@ -298,18 +221,16 @@ class ApiService {
     }
   }
 
-  // --- プロフィール関連 ---
+  // --- ユーザープロフィール取得 ---
   Future<Map<String, dynamic>?> getUserProfile(String username) async {
     try {
       final response = await http.get(
-        Uri.parse('$_baseUrl/users/$username'),
+        Uri.parse('$baseUrl/users/$username'),
         headers: await _getHeaders(needsAuth: true),
       );
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200)
         return jsonDecode(response.body) as Map<String, dynamic>;
-      } else {
-        return null;
-      }
+      return null;
     } catch (e) {
       return null;
     }
@@ -327,24 +248,22 @@ class ApiService {
         if (base64Image != null) 'profileImageBase64': base64Image,
         'storeCode': storeCode,
       };
-
       final response = await http.put(
-        Uri.parse('$_baseUrl/users/me'),
+        Uri.parse('$baseUrl/users/me'),
         headers: await _getHeaders(needsAuth: true),
         body: jsonEncode(body),
       );
-
       return response.statusCode == 200;
     } catch (e) {
       return false;
     }
   }
 
-  // --- フォロー関連 ---
+  // --- フォロー ---
   Future<bool> followUser(String userId) async {
     try {
       final response = await http.post(
-        Uri.parse('$_baseUrl/users/$userId/follow'),
+        Uri.parse('$baseUrl/users/$userId/follow'),
         headers: await _getHeaders(needsAuth: true),
       );
       return response.statusCode == 201;
@@ -353,10 +272,11 @@ class ApiService {
     }
   }
 
+  // --- フォロー解除 ---
   Future<bool> unfollowUser(String userId) async {
     try {
       final response = await http.delete(
-        Uri.parse('$_baseUrl/users/$userId/follow'),
+        Uri.parse('$baseUrl/users/$userId/follow'),
         headers: await _getHeaders(needsAuth: true),
       );
       return response.statusCode == 200;
@@ -365,77 +285,143 @@ class ApiService {
     }
   }
 
+  // --- フォローリスト ---
   Future<List<dynamic>> getFollowingUsers(String username) async {
     try {
       final response = await http.get(
-        Uri.parse('$_baseUrl/users/$username/following'),
+        Uri.parse('$baseUrl/users/$username/following'),
         headers: await _getHeaders(),
       );
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200)
         return jsonDecode(response.body) as List<dynamic>;
-      } else {
-        return [];
-      }
+      return [];
     } catch (e) {
       return [];
     }
   }
 
-  // --- ランキング取得 API ---
+  // --- ランキング ---
   Future<List<dynamic>> getRanking(String type) async {
     try {
       final response = await http.get(
-        Uri.parse('$_baseUrl/posts/ranking?type=$type'),
+        Uri.parse('$baseUrl/posts/ranking?type=$type'),
         headers: await _getHeaders(needsAuth: true),
       );
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200)
         return jsonDecode(response.body) as List<dynamic>;
-      } else {
-        return [];
-      }
+      return [];
     } catch (e) {
       return [];
     }
   }
 
-  // --- 未読管理用のメソッド ---
+  // --- 未読管理 ---
   Future<void> saveLastReadTime(String key) async {
-    final now = DateTime.now().toIso8601String();
-    await _storage.write(key: 'last_read_$key', value: now);
+    await _storage.write(
+      key: 'last_read_$key',
+      value: DateTime.now().toIso8601String(),
+    );
   }
 
   Future<DateTime?> getLastReadTime(String key) async {
     final timeStr = await _storage.read(key: 'last_read_$key');
-    if (timeStr != null) {
-      return DateTime.tryParse(timeStr);
-    }
+    if (timeStr != null) return DateTime.tryParse(timeStr);
     return null;
   }
 
   // --- カテゴリー更新 ---
   Future<bool> updateCategories(String userId, List<String> categories) async {
-    final token = await _storage.read(key: 'jwt_token');
-    if (token == null) return false;
-
     try {
       final response = await http.put(
-        Uri.parse('$_baseUrl/users/$userId/categories'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
+        Uri.parse('$baseUrl/users/$userId/categories'),
+        headers: await _getHeaders(needsAuth: true),
         body: jsonEncode({'categories': categories}),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // --- 店舗リスト取得 ---
+  Future<List<dynamic>> getStores() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/stores'),
+        headers: await _getHeaders(),
       );
 
       if (response.statusCode == 200) {
-        return true;
+        return jsonDecode(response.body) as List<dynamic>;
+      }
+      return [];
+    } catch (e) {
+      print('Get stores error: $e');
+      return [];
+    }
+  }
+
+  // 店舗ランキング取得
+  Future<List<dynamic>> getStoreRanking() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/ranking/stores'),
+        headers: await _getHeaders(needsAuth: true),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as List<dynamic>;
+      }
+      return [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // 店舗内ユーザーランキング取得
+  Future<List<dynamic>> getStoreUserRanking(String storeCode) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/ranking/stores/$storeCode/users'),
+        headers: await _getHeaders(needsAuth: true),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as List<dynamic>;
+      }
+      return [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // --- 投稿編集 ---
+  Future<bool> updatePost(String postId, Map<String, dynamic> data) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/posts/$postId'),
+        headers: await _getHeaders(needsAuth: true),
+        body: jsonEncode(data),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Update post error: $e');
+      return false;
+    }
+  }
+
+  // --- 真似したいリスト取得 ---
+  Future<List<dynamic>> getCopiedPosts() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/users/me/copied'),
+        headers: await _getHeaders(needsAuth: true),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(utf8.decode(response.bodyBytes));
       } else {
-        print('Category update failed: ${response.body}');
-        return false;
+        return [];
       }
     } catch (e) {
-      print('Category update error: $e');
-      return false;
+      return [];
     }
   }
 }

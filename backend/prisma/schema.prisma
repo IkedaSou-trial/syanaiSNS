@@ -25,12 +25,12 @@ model User {
   displayName       String                        @map("display_name") // 画面表示名
   password          String                        // ハッシュ化されたパスワード
   storeCode         String                        @map("store_code")   // 所属店舗コード
+  store             Store?   @relation(fields: [storeCode], references: [code])
   profileImageUrl   String?                       @map("profile_image_url") // プロフィール画像のURL (オプショナル)
   interestedCategories String? @default("[]")
 
   // リレーション
   posts             Post[]                        // このユーザーが作成した投稿
-  comments          Comment[]                     // このユーザーが作成したコメント
 
   // 💡 User がどの「いいね」をしたか
   likes     Like[]
@@ -59,33 +59,14 @@ model Post {
 
   postType  String   @default("INDIVIDUAL") @map("post_type")
 
-  comments  Comment[]                     // この投稿に付けられたコメント
-
   // 💡 post がどの「いいね」をしたか
   likes     Like[]
   
+  tags      Tag[]    @relation("PostTags")
 
   @@map("posts") // データベース上のテーブル名を明示的に "posts" に設定
 }
 
-// コメントモデル
-// データベース上のテーブル名は "comments" になります
-model Comment {
-  id        String   @id @default(uuid()) // UUIDを主キーとして使用
-  createdAt DateTime @default(now())      @map("created_at") // 作成日時
-  updatedAt DateTime @updatedAt           @map("updated_at") // 更新日時
-
-  content   String                        // コメント本文
-
-  // リレーション (誰がどの投稿にコメントしたか)
-  authorId  String                        @map("author_id") // コメントしたユーザーのID
-  author    User     @relation(fields: [authorId], references: [id]) // コメント投稿者へのリレーション
-
-  postId    String                        @map("post_id")   // コメント先の投稿ID
-  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
-
-  @@map("comments") // データベース上のテーブル名を明示的に "comments" に設定
-}
 
 model Like {
   id        String   @id @default(uuid())
@@ -98,9 +79,11 @@ model Like {
   postId    String   @map("post_id")
   post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
 
+  type      String   @default("LIKE") // "LIKE" (いいね) または "COPY" (真似したい)
+
   // 💡 同じユーザーが同じ投稿に1回しか「いいね」できないように、
   // ユーザーIDと投稿IDの組み合わせをユニーク（一意）にします
-  @@unique([userId, postId])
+  @@unique([userId, postId, type])
   @@map("likes")
 }
 
@@ -117,4 +100,22 @@ model Follow {
   // 複合主キー: 同じペアのフォローは1回だけ
   @@id([followerId, followingId])
   @@map("follows")
+}
+
+// ▼▼▼ 追加: タグモデル ▼▼▼
+model Tag {
+  id    String @id @default(uuid())
+  name  String @unique // タグ名 (例: "青果", "特売")
+
+  posts Post[] @relation("PostTags")
+
+  @@map("tags")
+}
+
+model Store {
+  id        String   @id @default(uuid())
+  code      String   @unique // 店舗コード (例: "1001")
+  name      String   // 店舗名 (例: "渋谷店")
+  createdAt DateTime @default(now())
+  users     User[]
 }

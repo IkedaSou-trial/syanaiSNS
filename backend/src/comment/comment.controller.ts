@@ -1,73 +1,73 @@
 import * as express from 'express';
 import prisma from '../lib/prisma';
-import { authenticateJWT, authenticateJWT_Optional, AuthRequest } from '../auth/auth.middleware';
-import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import { authenticateJWT, AuthRequest } from '../auth/auth.middleware';
 
-const commentRouter = express.Router({ mergeParams: true });
+const commentRouter = express.Router({ mergeParams: true }); 
+// mergeParams: true にすることで、親ルーター(posts)の :postId を受け取れるようにする
 
 /**
  * GET /posts/:postId/comments
- * 特定の投稿ID（postId）のコメント一覧を取得
+ * コメント一覧取得
  */
-commentRouter.get('/', authenticateJWT_Optional, async (req: AuthRequest<{ postId: string }>, res) => {
+// ▼▼▼ 修正: AuthRequest<any> ではなく AuthRequest にする ▼▼▼
+commentRouter.get('/', authenticateJWT, async (req: AuthRequest, res) => {
   const { postId } = req.params;
-  const userId = req.user?.id;
 
   try {
     const comments = await prisma.comment.findMany({
-      where: {
-        postId: postId,
-      },
-      orderBy: {
-        createdAt: 'asc',
-      },
+      where: { postId: String(postId) },
+      orderBy: { createdAt: 'asc' }, // 古い順
       include: {
         author: {
           select: {
             id: true,
             displayName: true,
             profileImageUrl: true,
+            username: true,
+            storeCode: true,
           },
         },
       },
     });
 
-    // 自分のコメントかどうかのフラグ (isMine) を追加して返す
-    const commentsWithStatus = comments.map(comment => ({
-      ...comment,
-      isMine: userId && comment.authorId === userId,
+    const userId = req.user?.id;
+
+    // 自分のコメントかどうか判定フラグをつける
+    const formattedComments = comments.map((c) => ({
+      ...c,
+      isMyComment: c.authorId === userId,
     }));
 
-    res.json(commentsWithStatus);
+    res.json(formattedComments);
   } catch (error) {
-    console.error('Error fetching comments:', error);
-    res.status(500).json({ error: 'コメントの取得に失敗しました。' });
+    console.error('Get comments error:', error);
+    res.status(500).json({ error: 'コメントの取得に失敗しました' });
   }
 });
 
 /**
  * POST /posts/:postId/comments
- * 特定の投稿ID（postId）にコメントを作成 (認証必須)
+ * コメント作成
  */
-commentRouter.post('/', authenticateJWT, async (req: AuthRequest<{ postId: string }>, res) => {
+// ▼▼▼ 修正: AuthRequest<any> ではなく AuthRequest にする ▼▼▼
+commentRouter.post('/', authenticateJWT, async (req: AuthRequest, res) => {
   const { postId } = req.params;
   const { content } = req.body;
   const authorId = req.user?.id;
 
   if (!content) {
-    return res.status(400).json({ error: 'コメント内容（content）は必須です。' });
+    return res.status(400).json({ error: 'コメント内容を入力してください' });
   }
-
   if (!authorId) {
-    return res.status(403).json({ error: '認証情報がありません。' });
+    return res.status(401).json({ error: '認証エラー' });
   }
 
   try {
     const newComment = await prisma.comment.create({
       data: {
         content,
-        authorId,
-        postId,
+        postId: String(postId),
+        authorId: authorId,
       },
       include: {
         author: {
@@ -75,50 +75,49 @@ commentRouter.post('/', authenticateJWT, async (req: AuthRequest<{ postId: strin
             id: true,
             displayName: true,
             profileImageUrl: true,
+            username: true,
+            storeCode: true,
           },
         },
       },
     });
-    
-    // 作成直後のレスポンスにも isMine をつける
-    const commentWithStatus = {
-      ...newComment,
-      isMine: true,
-    };
 
-    res.status(201).json(commentWithStatus);
+    res.status(201).json({
+      ...newComment,
+      isMyComment: true,
+    });
   } catch (error) {
-    console.error('Error creating comment:', error);
-    if (error instanceof PrismaClientKnownRequestError) {
-      if (error.code === 'P2003') {
-        return res.status(404).json({ error: 'コメント対象の投稿が見つかりません。' });
-      }
-    }
-    res.status(500).json({ error: 'コメントの作成に失敗しました。' });
+    console.error('Create comment error:', error);
+    res.status(500).json({ error: 'コメントの投稿に失敗しました' });
   }
 });
 
 /**
  * DELETE /posts/:postId/comments/:commentId
- * コメントを削除する (本人のみ)
+ * コメント削除
  */
-commentRouter.delete('/:commentId', authenticateJWT, async (req: AuthRequest<{ postId: string; commentId: string }>, res) => {
+// ▼▼▼ 修正: AuthRequest<any> ではなく AuthRequest にする ▼▼▼
+commentRouter.delete('/:commentId', authenticateJWT, async (req: AuthRequest, res) => {
   const { commentId } = req.params;
   const userId = req.user?.id;
 
-  if (!userId) return res.status(403).json({ error: '認証が必要です' });
-
   try {
-    const { count } = await prisma.comment.deleteMany({
-      where: {
-        id: commentId,
-        authorId: userId, // 自分のコメントのみ削除可能
-      },
+    const comment = await prisma.comment.findUnique({
+      where: { id: String(commentId) },
     });
 
-    if (count === 0) {
-      return res.status(404).json({ error: 'コメントが見つからないか、削除権限がありません' });
+    if (!comment) {
+      return res.status(404).json({ error: 'コメントが見つかりません' });
     }
+
+    // 自分のコメントかチェック
+    if (comment.authorId !== userId) {
+      return res.status(403).json({ error: '削除権限がありません' });
+    }
+
+    await prisma.comment.delete({
+      where: { id: String(commentId) },
+    });
 
     res.json({ message: 'コメントを削除しました' });
   } catch (error) {

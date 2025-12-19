@@ -13,6 +13,7 @@ class Post {
   final String authorId;
   // ▼▼▼ 追加 ▼▼▼
   final String category;
+  final String postType; // 'INDIVIDUAL' or 'STORE'
 
   Post({
     required this.id,
@@ -29,6 +30,7 @@ class Post {
     required this.authorId,
     // ▼▼▼ 追加 (デフォルト値 'その他') ▼▼▼
     this.category = 'その他',
+    this.postType = 'INDIVIDUAL',
   });
 
   factory Post.fromJson(Map<String, dynamic> json) {
@@ -47,6 +49,7 @@ class Post {
       authorId: json['author']['id'].toString(),
       // ▼▼▼ 追加 ▼▼▼
       category: json['category'] ?? 'その他',
+      postType: json['postType'] ?? 'INDIVIDUAL',
     );
   }
 }

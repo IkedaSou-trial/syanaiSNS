@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:like_button/like_button.dart';
 import '../services/api_service.dart';
-import 'dart:convert';
 import '../utils/date_formatter.dart';
 import '../widgets/post_skeleton.dart';
+import '../widgets/hashtag_text.dart';
+import '../widgets/post_image.dart';
+import 'edit_post_screen.dart'; // 👈 追加: 編集画面のインポート
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -16,8 +17,15 @@ class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   final ApiService _apiService = ApiService();
 
+  // 生データ（フィルター前）
+  List<dynamic> _rawAllPosts = [];
+  List<dynamic> _rawStorePosts = [];
+
+  // 表示用データ（フィルター後）
   List<dynamic> _posts = [];
+  List<dynamic> _storePosts = [];
   List<dynamic> _followingPosts = [];
+
   bool _isLoading = true;
 
   late TabController _tabController;
@@ -26,16 +34,16 @@ class _HomeScreenState extends State<HomeScreen>
   Map<String, dynamic>? _currentUser;
   bool _isInit = true;
 
-  // ▼▼▼ 追加: 自分の投稿を表示するかどうかのフラグ ▼▼▼
-  bool _showMyPosts = false; // デフォルトはOFF（厳格なフィルター）
+  // 自分の投稿を表示するかどうかのフラグ
+  bool _showMyPosts = false;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
 
     _tabController.addListener(() {
-      if (!_tabController.indexIsChanging && _tabController.index == 1) {
+      if (!_tabController.indexIsChanging && _tabController.index == 2) {
         setState(() {
           _hasNewFollowing = false;
         });
@@ -51,93 +59,130 @@ class _HomeScreenState extends State<HomeScreen>
       final args = ModalRoute.of(context)?.settings.arguments;
       if (args != null && args is Map<String, dynamic>) {
         _currentUser = args;
-        print("📲 引数からユーザー情報を取得しました");
-      } else {
-        print("⚠️ 引数がありません。APIからユーザー情報を取得します...");
       }
-      _refreshPosts();
+      _fetchPosts();
       _isInit = false;
     }
+  }
+
+  Future<void> _fetchPosts() async {
+    if (_currentUser == null) {
+      final fullProfileData = await _apiService.fetchCurrentUser();
+      if (fullProfileData != null && fullProfileData['user'] != null) {
+        _currentUser = fullProfileData['user'];
+      }
+    }
+
+    try {
+      final results = await Future.wait([
+        _apiService.getPosts(), // 0: おすすめ
+        _apiService.getPosts(filterType: 'store'), // 1: 店舗のみ
+        _apiService.getPosts(onlyFollowing: true), // 2: フォロー中
+      ]);
+
+      if (mounted) {
+        setState(() {
+          _rawAllPosts = results[0];
+          _rawStorePosts = results[1];
+          _followingPosts = results[2];
+          _isLoading = false;
+        });
+
+        // データを取得したらフィルター適用
+        _applyFilter();
+
+        if (_tabController.index == 2) {
+          _apiService.saveLastReadTime('following');
+        } else {
+          _checkUnreadStatus(_followingPosts);
+        }
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // フィルターロジック
+  void _applyFilter() {
+    List<dynamic> filterList(List<dynamic> sourceList) {
+      if (_currentUser == null) return sourceList;
+
+      final rawCategories = _currentUser!['interestedCategories'];
+      final List<String> myCategories = (rawCategories is List)
+          ? rawCategories.map((e) => e.toString()).toList()
+          : [];
+
+      return sourceList.where((post) {
+        final String postCategory = post['category'] ?? 'その他';
+        final bool isMine = post['isMine'] ?? false;
+
+        // 1. 自分の投稿の場合
+        if (isMine) {
+          return _showMyPosts;
+        }
+
+        // 2. 他人の投稿の場合
+        if (myCategories.contains(postCategory)) {
+          return true;
+        }
+
+        return false;
+      }).toList();
+    }
+
+    setState(() {
+      _posts = filterList(_rawAllPosts);
+      _storePosts = filterList(_rawStorePosts);
+    });
   }
 
   Future<void> _checkUnreadStatus(List<dynamic> posts) async {
     if (posts.isEmpty) return;
     final latestPostTimeStr = posts.first['createdAt'];
     if (latestPostTimeStr == null) return;
-
     final latestPostTime = DateTime.tryParse(latestPostTimeStr);
     if (latestPostTime == null) return;
 
     final lastReadTime = await _apiService.getLastReadTime('following');
 
     if (lastReadTime == null || latestPostTime.isAfter(lastReadTime)) {
-      if (mounted) {
-        setState(() {
-          _hasNewFollowing = true;
-        });
-      }
+      if (mounted) setState(() => _hasNewFollowing = true);
     }
   }
 
-  Future<void> _refreshPosts() async {
-    if (_currentUser == null) {
-      final fullProfileData = await _apiService.fetchCurrentUser();
-      if (fullProfileData != null && fullProfileData['user'] != null) {
-        _currentUser = fullProfileData['user'];
-        print("🔄 APIからユーザー情報を復元しました");
+  // リアクション切り替え処理
+  Future<void> _toggleReaction(String postId, String type) async {
+    void updateList(List<dynamic> list) {
+      final index = list.indexWhere((p) => p['id'] == postId);
+      if (index != -1) {
+        final post = list[index];
+        final bool isLiked = post['isLikedByMe'] ?? false;
+        final bool isCopied = post['isCopiedByMe'] ?? false;
+
+        if (type == 'LIKE') {
+          post['isLikedByMe'] = !isLiked;
+          post['likeCount'] = (post['likeCount'] ?? 0) + (!isLiked ? 1 : -1);
+        } else if (type == 'COPY') {
+          post['isCopiedByMe'] = !isCopied;
+          post['copyCount'] = (post['copyCount'] ?? 0) + (!isCopied ? 1 : -1);
+        }
       }
     }
 
-    final results = await Future.wait([
-      _apiService.getPosts(),
-      _apiService.getPosts(onlyFollowing: true),
-    ]);
+    setState(() {
+      updateList(_rawAllPosts);
+      updateList(_rawStorePosts);
+      updateList(_followingPosts);
+      _applyFilter();
+    });
 
-    List<dynamic> allPosts = results[0];
+    final success = await _apiService.toggleReaction(postId, type);
 
-    // フィルター処理
-    if (_currentUser != null) {
-      final rawCategories = _currentUser!['interestedCategories'];
-
-      if (rawCategories != null &&
-          rawCategories is List &&
-          rawCategories.isNotEmpty) {
-        final List<String> myCategories = rawCategories
-            .map((e) => e.toString())
-            .toList();
-        print("🔎 フィルター実行: $myCategories (自分の投稿を表示: $_showMyPosts)");
-
-        allPosts = allPosts.where((post) {
-          final String postCategory = post['category'] ?? 'その他';
-          final bool isMine = post['isMine'] ?? false;
-
-          // ▼▼▼ 修正: スイッチがONなら自分の投稿は無条件で表示 ▼▼▼
-          if (_showMyPosts && isMine) return true;
-
-          // それ以外はカテゴリーで判定
-          return myCategories.contains(postCategory);
-        }).toList();
-
-        print("✅ フィルター完了: 残り${allPosts.length}件");
-      }
-    }
-
-    if (mounted) {
-      setState(() {
-        _posts = allPosts;
-        _followingPosts = results[1];
-        _isLoading = false;
-      });
-
-      if (_tabController.index == 1) {
-        _apiService.saveLastReadTime('following');
-      } else {
-        _checkUnreadStatus(_followingPosts);
-      }
+    if (!success && mounted) {
+      _fetchPosts();
     }
   }
 
-  // ... (省略: _deletePostProcess, _getImageProvider, _buildPostList は変更なし) ...
   Future<void> _deletePostProcess(String postId) async {
     final shouldDelete = await showDialog<bool>(
       context: context,
@@ -162,7 +207,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (shouldDelete == true) {
       final success = await _apiService.deletePost(postId);
       if (success) {
-        _refreshPosts();
+        _fetchPosts();
         if (mounted) {
           ScaffoldMessenger.of(
             context,
@@ -170,19 +215,6 @@ class _HomeScreenState extends State<HomeScreen>
         }
       }
     }
-  }
-
-  ImageProvider? _getImageProvider(String? url) {
-    if (url == null) return null;
-    if (url.startsWith('data:')) {
-      try {
-        final base64Str = url.split(',')[1];
-        return MemoryImage(base64Decode(base64Str));
-      } catch (e) {
-        return null;
-      }
-    }
-    return NetworkImage(url);
   }
 
   Widget _buildPostList(List<dynamic> targetPosts) {
@@ -224,196 +256,229 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     return RefreshIndicator(
-      onRefresh: _refreshPosts,
+      onRefresh: _fetchPosts,
       child: ListView.builder(
         itemCount: targetPosts.length,
         itemBuilder: (context, index) {
           final post = targetPosts[index];
-          final author = post['author'];
-          final int likeCount = post['likeCount'] ?? 0;
-          final bool isLikedByMe = post['isLikedByMe'] ?? false;
-          final int commentCount = post['commentCount'] ?? 0;
-          final bool isMine = post['isMine'] ?? false;
-          final String category = post['category'] ?? 'その他';
+          return _buildPostItem(post);
+        },
+      ),
+    );
+  }
 
-          return InkWell(
-            onTap: () {
-              Navigator.of(context).pushNamed('/post_detail', arguments: post);
-            },
-            child: Card(
-              margin: const EdgeInsets.symmetric(
-                horizontal: 8.0,
-                vertical: 6.0,
-              ),
-              elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  // 個別の投稿カード
+  Widget _buildPostItem(Map<String, dynamic> post) {
+    final author = post['author'];
+    final bool isMine = post['isMine'] ?? false;
+    final String category = post['category'] ?? 'その他';
+
+    // リアクション情報
+    final bool isLiked = post['isLikedByMe'] ?? false;
+    final int likeCount = post['likeCount'] ?? 0;
+    final bool isCopied = post['isCopiedByMe'] ?? false;
+    final int copyCount = post['copyCount'] ?? 0;
+
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).pushNamed('/post_detail', arguments: post);
+      },
+      child: Card(
+        margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // --- ヘッダー ---
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  GestureDetector(
+                    onTap: () {
+                      final username = author?['username'];
+                      if (username != null) {
+                        Navigator.of(
+                          context,
+                        ).pushNamed('/profile', arguments: username);
+                      }
+                    },
+                    child: Row(
                       children: [
-                        Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 18,
-                              backgroundImage: _getImageProvider(
-                                author?['profileImageUrl'],
-                              ),
-                              backgroundColor: Colors.grey[200],
-                              child: author?['profileImageUrl'] == null
-                                  ? const Icon(
+                        SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: ClipOval(
+                            child: author?['profileImageUrl'] != null
+                                ? PostImage(
+                                    imageUrl: author!['profileImageUrl'],
+                                    height: 40,
+                                    fit: BoxFit.cover,
+                                  )
+                                : Container(
+                                    color: Colors.grey[200],
+                                    child: const Icon(
                                       Icons.person,
-                                      size: 20,
+                                      size: 24,
                                       color: Colors.grey,
-                                    )
-                                  : null,
-                            ),
-                            const SizedBox(width: 10),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                GestureDetector(
-                                  onTap: () {
-                                    final username = author?['username'];
-                                    if (username != null) {
-                                      Navigator.of(context).pushNamed(
-                                        '/profile',
-                                        arguments: username,
-                                      );
-                                    }
-                                  },
-                                  child: Text(
-                                    author?['displayName'] ?? '不明なユーザー',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 15,
                                     ),
                                   ),
-                                ),
-                                Text(
-                                  DateFormatter.timeAgo(post['createdAt']),
-                                  style: const TextStyle(
-                                    color: Colors.grey,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+                          ),
                         ),
-                        Row(
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.grey[200],
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                category,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.black54,
-                                ),
+                            Text(
+                              author?['displayName'] ?? '不明なユーザー',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
                               ),
                             ),
-                            if (isMine)
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.more_horiz,
-                                  color: Colors.grey,
-                                ),
-                                onPressed: () => _deletePostProcess(post['id']),
+                            Text(
+                              DateFormatter.timeAgo(post['createdAt']),
+                              style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 12,
                               ),
+                            ),
                           ],
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      post['content'] ?? '',
-                      style: const TextStyle(fontSize: 15, height: 1.4),
-                    ),
-                    if (post['imageUrl'] != null) ...[
-                      const SizedBox(height: 12),
-                      Hero(
-                        tag: post['id'],
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image(
-                            image: _getImageProvider(post['imageUrl'])!,
-                            fit: BoxFit.cover,
-                            width: double.infinity,
-                            height: 250,
+                  ),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          category,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.black54,
+                            fontWeight: FontWeight.normal,
                           ),
                         ),
                       ),
-                    ],
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        LikeButton(
-                          size: 24,
-                          isLiked: isLikedByMe,
-                          likeCount: likeCount,
-                          countBuilder:
-                              (int? count, bool isLiked, String text) {
-                                return Text(
-                                  text,
-                                  style: TextStyle(
-                                    color: isLiked ? Colors.red : Colors.grey,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                );
-                              },
-                          onTap: (bool isLiked) async {
-                            bool success;
-                            if (isLiked) {
-                              success = await _apiService.unlikePost(
-                                post['id'],
+                      // ▼▼▼ 修正: 自分の投稿なら編集/削除メニューを表示 ▼▼▼
+                      if (isMine)
+                        PopupMenuButton<String>(
+                          icon: const Icon(
+                            Icons.more_horiz,
+                            color: Colors.grey,
+                          ),
+                          onSelected: (value) async {
+                            if (value == 'edit') {
+                              // 編集画面へ遷移
+                              final result = await Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      EditPostScreen(post: post),
+                                ),
                               );
-                            } else {
-                              success = await _apiService.likePost(post['id']);
+                              // 編集から戻ってきたらリストを更新
+                              if (result == true) {
+                                _fetchPosts();
+                              }
+                            } else if (value == 'delete') {
+                              // 削除処理
+                              _deletePostProcess(post['id']);
                             }
-                            return success ? !isLiked : isLiked;
                           },
-                        ),
-                        const SizedBox(width: 24),
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.chat_bubble_outline,
-                              size: 22,
-                              color: Colors.grey,
+                          itemBuilder: (context) => [
+                            const PopupMenuItem(
+                              value: 'edit',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.edit, color: Colors.blue),
+                                  SizedBox(width: 8),
+                                  Text('編集する'),
+                                ],
+                              ),
                             ),
-                            const SizedBox(width: 6),
-                            Text(
-                              '$commentCount',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey,
-                                fontWeight: FontWeight.bold,
+                            const PopupMenuItem(
+                              value: 'delete',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.delete, color: Colors.red),
+                                  SizedBox(width: 8),
+                                  Text('削除する'),
+                                ],
                               ),
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  ],
-                ),
+                      // ▲▲▲ 修正ここまで ▲▲▲
+                    ],
+                  ),
+                ],
               ),
-            ),
-          );
-        },
+              const SizedBox(height: 8),
+
+              // --- 本文 ---
+              HashtagText(
+                text: post['content'] ?? '',
+                style: const TextStyle(
+                  fontSize: 15,
+                  height: 1.4,
+                  color: Colors.black,
+                ),
+                onTagTap: (tag) {
+                  Navigator.of(
+                    context,
+                  ).pushNamed('/search', arguments: {'tag': tag});
+                },
+              ),
+
+              // --- 画像 ---
+              if (post['imageUrl'] != null) ...[
+                const SizedBox(height: 12),
+                Hero(
+                  tag: post['id'],
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: PostImage(imageUrl: post['imageUrl'], height: 250),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+
+              // --- リアクションボタンエリア ---
+              Row(
+                children: [
+                  // 1. いいねボタン
+                  _ReactionButton(
+                    icon: isLiked ? Icons.favorite : Icons.favorite_border,
+                    color: isLiked ? Colors.red : Colors.grey,
+                    count: likeCount,
+                    label: 'いいね',
+                    onTap: () => _toggleReaction(post['id'], 'LIKE'),
+                  ),
+
+                  const SizedBox(width: 24),
+                  // 2. 真似したいボタン
+                  _ReactionButton(
+                    icon: isCopied ? Icons.lightbulb : Icons.lightbulb_outline,
+                    color: isCopied ? Colors.orange : Colors.grey,
+                    count: copyCount,
+                    label: '真似したい',
+                    onTap: () => _toggleReaction(post['id'], 'COPY'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -428,32 +493,24 @@ class _HomeScreenState extends State<HomeScreen>
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         centerTitle: false,
-        elevation: 0,
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         actions: [
-          // ▼▼▼ 追加: カテゴリー変更ボタン ▼▼▼
           IconButton(
-            icon: const Icon(Icons.tune), // 調節つまみアイコン
-            tooltip: '表示カテゴリーを変更',
+            icon: const Icon(Icons.tune),
             onPressed: () async {
-              // カテゴリー選択画面を開き、戻ってくるのを待つ
-              final updatedUser = await Navigator.of(context).pushNamed(
-                '/category_selection',
-                arguments: _currentUser, // 今の設定を渡す
-              );
+              final args = Map<String, dynamic>.from(_currentUser!);
+              args['isEditing'] = true;
+              final updatedUser = await Navigator.of(
+                context,
+              ).pushNamed('/category_selection', arguments: args);
 
-              // もし更新されて帰ってきたら、画面を更新する
               if (updatedUser != null && updatedUser is Map<String, dynamic>) {
-                setState(() {
-                  _currentUser = updatedUser;
-                });
-                _refreshPosts(); // リストを再取得してフィルターし直す
+                setState(() => _currentUser = updatedUser);
+                _applyFilter();
               }
             },
           ),
-
-          // ▼▼▼ 既存: 自分の投稿スイッチ ▼▼▼
           Row(
             children: [
               const Text(
@@ -461,15 +518,15 @@ class _HomeScreenState extends State<HomeScreen>
                 style: TextStyle(fontSize: 10, color: Colors.black54),
               ),
               Transform.scale(
-                scale: 0.8, // スイッチを少し小さく
+                scale: 0.8,
                 child: Switch(
                   value: _showMyPosts,
                   activeColor: Colors.blue[800],
                   onChanged: (value) {
                     setState(() {
                       _showMyPosts = value;
+                      _applyFilter();
                     });
-                    _refreshPosts();
                   },
                 ),
               ),
@@ -484,6 +541,7 @@ class _HomeScreenState extends State<HomeScreen>
           indicatorColor: Colors.blue[800],
           tabs: [
             const Tab(text: 'おすすめ'),
+            const Tab(text: '店舗'),
             Tab(
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -501,15 +559,66 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [_buildPostList(_posts), _buildPostList(_followingPosts)],
+        children: [
+          _buildPostList(_posts), // 0: おすすめ
+          _buildPostList(_storePosts), // 1: 店舗
+          _buildPostList(_followingPosts), // 2: フォロー中
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.blue[800],
         onPressed: () async {
           final result = await Navigator.of(context).pushNamed('/create_post');
-          if (result == true) _refreshPosts();
+          if (result == true) _fetchPosts();
         },
         child: const Icon(Icons.edit, color: Colors.white),
+      ),
+    );
+  }
+}
+
+// リアクションボタン
+class _ReactionButton extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final int count;
+  final String label;
+  final VoidCallback onTap;
+
+  const _ReactionButton({
+    required this.icon,
+    required this.color,
+    required this.count,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 26),
+          const SizedBox(width: 6),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '$count',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  color: color,
+                ),
+              ),
+              Text(
+                label,
+                style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

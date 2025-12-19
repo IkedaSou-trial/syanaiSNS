@@ -1,23 +1,34 @@
 import * as express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import axios from 'axios';
 import prisma from '../lib/prisma';
-import * as crypto from 'crypto';
+import { JWT_SECRET } from '../config';
 
 const authRouter = express.Router();
 const SALT_ROUNDS = 10;
-const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_SUPER_SECRET_KEY';
 
-// 共通のログイン成功レスポンス生成関数
+// ▼▼▼ 共通: 名前に店舗名をつける関数 ▼▼▼
+const formatName = (user: any) => {
+  // 店舗情報(store)があり、かつ店舗名(store.name)がある場合
+  if (user.store && user.store.name) {
+    return `${user.displayName}＠${user.store.name}`;
+  }
+  // なければそのままの名前を返す
+  return user.displayName;
+};
+
+// 共通のレスポンス生成
 const createLoginResponse = (user: any) => {
   const token = jwt.sign(
-    { userId: user.id, username: user.username },
+    { 
+      id: user.id,
+      username: user.username,
+      storeCode: user.storeCode
+    },
     JWT_SECRET,
     { expiresIn: '30d' }
   );
 
-  // JSON文字列を配列に戻す
   let categories = [];
   try {
     categories = JSON.parse(user.interestedCategories || '[]');
@@ -31,110 +42,116 @@ const createLoginResponse = (user: any) => {
     user: {
       id: user.id,
       username: user.username,
-      displayName: user.displayName,
+      // ▼▼▼ ここで関数を使って「＠店舗名」をつける ▼▼▼
+      displayName: formatName(user), 
       storeCode: user.storeCode,
-      interestedCategories: categories, // 👈 追加
+      profileImageUrl: user.profileImageUrl, // プロフィール画像も返しておく
+      interestedCategories: categories,
     }
   };
 };
 
-async function callExternalAuthApi(account: string, passwordHash: string) {
-  console.log(`[AUTH] 外部APIへ問い合わせ: ${account}`);
-  try {
-    const response = await axios.post('http://auth-intra.trechina.cn/Apps/authentication/authenticate', {
-      account: account,
-      password: passwordHash, 
-      systemid: "7c095dc3-6bea-4636-bacc-ce9abb19b597",
-      clientid: "10745145"
-    }, {
-      headers: { 'Content-Type': 'application/json' }
-    });
-    return response.data;
-  } catch (error) {
-    console.error('External API Error:', error);
-    return null;
+/**
+ * POST /auth/signup
+ * 新規登録 API
+ */
+authRouter.post('/signup', async (req, res) => {
+  const { username, password, displayName, storeCode } = req.body;
+
+  if (!username || !password || !displayName) {
+    return res.status(400).json({ error: '必須項目が不足しています' });
   }
-}
 
-// ... (以下、前回と同じ POST /login/barcode と POST /login のロジック)
-// 上記の createLoginResponse 関数を使っていればOKです。
-// 必要なら前回のコードをここに貼り付けますが、変更点は createLoginResponse だけです。
-
-authRouter.post('/login/barcode', async (req, res) => {
-  const { barcode } = req.body;
-  if (!barcode) return res.status(400).json({ error: 'バーコードなし' });
+  // パスワードの長さチェック
+  if (password.length < 4) {
+    return res.status(400).json({ error: 'パスワードは4文字以上で入力してください' });
+  }
 
   try {
-    let user = await prisma.user.findUnique({ where: { username: barcode } });
-    if (user) return res.json(createLoginResponse(user));
-
-    const defaultApiHash = "670b14728ad9902aecba32e22fa4f6bd";
-    const authData = await callExternalAuthApi(barcode, defaultApiHash);
-
-    if (!authData || authData.successed !== "0" || !authData.user) {
-      return res.status(401).json({ error: '社員情報の取得失敗' });
+    // ユーザー重複チェック
+    const existingUser = await prisma.user.findUnique({
+      where: { username },
+    });
+    if (existingUser) {
+      return res.status(409).json({ error: 'このIDは既に登録されています' });
     }
 
-    const externalUser = authData.user;
-    const orgCode = externalUser.jobs?.[0]?.orgcode || '000';
-    const dummyHash = await bcrypt.hash("000000", SALT_ROUNDS);
+    // パスワードのハッシュ化
+    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
-    user = await prisma.user.create({
+    // ユーザー作成
+    const user = await prisma.user.create({
       data: {
-        username: externalUser.account,
-        password: dummyHash,
-        displayName: externalUser.name,
-        storeCode: orgCode,
+        username,
+        password: hashedPassword,
+        displayName,
+        storeCode: storeCode || '000',
+        interestedCategories: '[]',
       },
+      // ▼▼▼ 店舗名を取得するために include を追加 ▼▼▼
+      include: { store: true }, 
     });
 
-    return res.json(createLoginResponse(user));
+    // そのままログインさせる
+    res.status(201).json(createLoginResponse(user));
 
   } catch (error) {
-    console.error('Barcode login error:', error);
-    res.status(500).json({ error: 'Server Error' });
+    console.error('Signup error:', error);
+    res.status(500).json({ error: 'アカウント作成に失敗しました' });
   }
 });
 
+/**
+ * POST /auth/login
+ * 通常ログイン (ID + Password)
+ */
 authRouter.post('/login', async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: '入力不足' });
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'IDとパスワードを入力してください' });
+  }
 
   try {
-    const inputHash = crypto.createHash('md5').update(password).digest('hex');
-    const authData = await callExternalAuthApi(username, inputHash);
+    const user = await prisma.user.findUnique({
+      where: { username },
+      // ▼▼▼ 店舗名を取得するために include を追加 ▼▼▼
+      include: { store: true }, 
+    });
 
-    if (!authData || authData.successed !== "0" || !authData.user) {
-      return res.status(401).json({ error: '認証失敗' });
+    if (!user) {
+      return res.status(401).json({ error: 'ユーザーが見つかりません' });
     }
 
-    const externalUser = authData.user;
-    const orgCode = externalUser.jobs?.[0]?.orgcode || '000';
-    
-    let user = await prisma.user.findUnique({ where: { username } });
-
-    if (user) {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: { displayName: externalUser.name, storeCode: orgCode }
-      });
-    } else {
-      const dummyHash = await bcrypt.hash("000000", SALT_ROUNDS);
-      user = await prisma.user.create({
-        data: {
-          username: externalUser.account,
-          password: dummyHash,
-          displayName: externalUser.name,
-          storeCode: orgCode,
-        },
-      });
+    // パスワード照合 (bcrypt)
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'パスワードが間違っています' });
     }
 
-    return res.json(createLoginResponse(user));
+    res.json(createLoginResponse(user));
 
   } catch (error) {
-    console.error('Manual login error:', error);
-    res.status(500).json({ error: 'Server Error' });
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'ログインエラー' });
+  }
+});
+
+/**
+ * POST /auth/check-user
+ * ユーザーが存在するかどうかだけを確認する
+ */
+authRouter.post('/check-user', async (req, res) => {
+  const { username } = req.body;
+  try {
+    const user = await prisma.user.findUnique({ where: { username } });
+    if (user) {
+      res.json({ exists: true, username: user.username });
+    } else {
+      res.json({ exists: false, username });
+    }
+  } catch (error) {
+    res.status(500).json({ error: '確認エラー' });
   }
 });
 

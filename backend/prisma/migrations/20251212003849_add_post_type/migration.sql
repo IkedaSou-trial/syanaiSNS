@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "posts" ADD COLUMN     "post_type" TEXT NOT NULL DEFAULT 'INDIVIDUAL';

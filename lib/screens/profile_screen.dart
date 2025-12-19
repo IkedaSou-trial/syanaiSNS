@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
-import 'dart:convert';
 import 'edit_profile_screen.dart';
 import '../utils/date_formatter.dart';
 import 'user_list_screen.dart';
+import '../widgets/post_image.dart';
+import 'edit_post_screen.dart';
+import 'copied_posts_screen.dart'; // 👈 追加
 
 class ProfileScreen extends StatefulWidget {
   final String username;
@@ -26,12 +28,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _fetchProfile();
   }
 
-  // プロフィールと投稿を取得
   Future<void> _fetchProfile() async {
-    // 画面全体をローディングにするのは初回のみにするため、
-    // ここではあえて setState(() => _isLoading = true) を書きません。
-    // そうすることで、引っ張って更新の時は今の画面を表示したまま裏で通信できます。
-
     final data = await _apiService.getUserProfile(widget.username);
 
     if (mounted) {
@@ -75,7 +72,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _userData!['postCount'] = (_userData!['postCount'] ?? 1) - 1;
           }
         });
-
         if (mounted) {
           ScaffoldMessenger.of(
             context,
@@ -85,35 +81,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  ImageProvider? _getImageProvider(String? url) {
-    if (url == null) return null;
-    if (url.startsWith('data:')) {
-      try {
-        final base64Str = url.split(',')[1];
-        return MemoryImage(base64Decode(base64Str));
-      } catch (e) {
-        return null;
+  Future<void> _toggleReaction(String postId, String type) async {
+    final index = _userPosts.indexWhere((p) => p['id'] == postId);
+    if (index == -1) return;
+
+    final post = _userPosts[index];
+    final bool isLiked = post['isLikedByMe'] ?? false;
+    final bool isCopied = post['isCopiedByMe'] ?? false;
+
+    setState(() {
+      if (type == 'LIKE') {
+        post['isLikedByMe'] = !isLiked;
+        post['likeCount'] = (post['likeCount'] ?? 0) + (!isLiked ? 1 : -1);
+      } else if (type == 'COPY') {
+        post['isCopiedByMe'] = !isCopied;
+        post['copyCount'] = (post['copyCount'] ?? 0) + (!isCopied ? 1 : -1);
       }
-    }
-    return NetworkImage(url);
-  }
+    });
 
-  Future<void> _toggleLike(String postId, bool isCurrentlyLiked) async {
-    bool success;
-    if (isCurrentlyLiked) {
-      success = await _apiService.unlikePost(postId);
-    } else {
-      success = await _apiService.likePost(postId);
-    }
-
-    if (success) {
+    final success = await _apiService.toggleReaction(postId, type);
+    if (!success && mounted) {
       setState(() {
-        final index = _userPosts.indexWhere((p) => p['id'] == postId);
-        if (index != -1) {
-          final post = _userPosts[index];
-          post['isLikedByMe'] = !isCurrentlyLiked;
-          post['likeCount'] =
-              (post['likeCount'] ?? 0) + (isCurrentlyLiked ? -1 : 1);
+        if (type == 'LIKE') {
+          post['isLikedByMe'] = isLiked;
+          post['likeCount'] = (post['likeCount'] ?? 0) + (isLiked ? 1 : -1);
+        } else if (type == 'COPY') {
+          post['isCopiedByMe'] = isCopied;
+          post['copyCount'] = (post['copyCount'] ?? 0) + (isCopied ? 1 : -1);
         }
       });
     }
@@ -121,7 +115,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _toggleFollow() async {
     if (_userData == null) return;
-
     final targetUserId = _userData!['id'];
     final isFollowing = _userData!['isFollowing'] ?? false;
 
@@ -139,21 +132,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _userData!['followerCount'] = currentFollowers + (isFollowing ? -1 : 1);
       });
     }
-  }
-
-  Widget _buildCountColumn(String label, int count, {VoidCallback? onTap}) {
-    return InkWell(
-      onTap: onTap,
-      child: Column(
-        children: [
-          Text(
-            count.toString(),
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          Text(label, style: const TextStyle(color: Colors.grey)),
-        ],
-      ),
-    );
   }
 
   Future<void> _handleLogout() async {
@@ -187,6 +165,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Widget _buildCountColumn(String label, int count, {VoidCallback? onTap}) {
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Text(
+            count.toString(),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          Text(label, style: const TextStyle(color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -204,7 +197,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_userData!['displayName'] ?? 'プロフィール'),
+        title: Text(
+          isMe ? 'マイページ' : (_userData!['displayName'] ?? 'プロフィール'),
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         actions: [
           if (isMe)
             IconButton(
@@ -212,17 +208,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onPressed: () async {
                 final result = await Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (context) => EditProfileScreen(
-                      currentDisplayName: _userData!['displayName'],
-                      currentImageUrl: _userData!['profileImageUrl'],
-                      currentStoreCode: _userData!['storeCode'] ?? 'A101',
-                    ),
+                    builder: (context) =>
+                        EditProfileScreen(currentUser: _userData!),
                   ),
                 );
-                // 編集から戻ってきたら自動更新
-                if (result == true) {
-                  _fetchProfile();
-                }
+                if (result == true) _fetchProfile();
               },
             ),
           IconButton(
@@ -232,28 +222,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
       ),
-      // ▼▼▼ 修正: RefreshIndicator で囲む ▼▼▼
       body: RefreshIndicator(
-        onRefresh: _fetchProfile, // 引っ張った時に呼ぶ関数
+        onRefresh: _fetchProfile,
         child: SingleChildScrollView(
-          // ▼▼▼ 修正: コンテンツが少なくてもスクロールできるようにする ▼▼▼
           physics: const AlwaysScrollableScrollPhysics(),
           child: Column(
             children: [
-              // --- 1. ユーザー情報ヘッダー ---
+              // --- ユーザー情報 ---
               Container(
                 padding: const EdgeInsets.all(20),
                 alignment: Alignment.center,
                 child: Column(
                   children: [
-                    CircleAvatar(
-                      radius: 40,
-                      backgroundImage: _getImageProvider(
-                        _userData!['profileImageUrl'],
+                    SizedBox(
+                      width: 80,
+                      height: 80,
+                      child: ClipOval(
+                        child: _userData!['profileImageUrl'] != null
+                            ? PostImage(
+                                imageUrl: _userData!['profileImageUrl'],
+                                fit: BoxFit.cover,
+                              )
+                            : Container(
+                                color: Colors.grey[200],
+                                child: const Icon(
+                                  Icons.person,
+                                  size: 40,
+                                  color: Colors.grey,
+                                ),
+                              ),
                       ),
-                      child: _userData!['profileImageUrl'] == null
-                          ? const Icon(Icons.person, size: 40)
-                          : null,
                     ),
                     const SizedBox(height: 10),
                     Text(
@@ -270,12 +268,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 5),
                     Chip(label: Text('店舗: ${_userData!['storeCode']}')),
                     const SizedBox(height: 10),
-                    Text(
-                      '投稿数: ${_userData!['postCount']}件',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 10),
-
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -302,6 +294,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                     const SizedBox(height: 15),
 
+                    // ▼▼▼ 追加: 自分の場合だけ「真似したいリスト」ボタンを表示 ▼▼▼
+                    if (isMe)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const CopiedPostsScreen(),
+                              ),
+                            );
+                          },
+                          icon: const Icon(
+                            Icons.lightbulb,
+                            color: Colors.orange,
+                          ),
+                          label: const Text('真似したいリストを見る'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.black87,
+                            side: const BorderSide(color: Colors.orange),
+                          ),
+                        ),
+                      ),
+
+                    // ▲▲▲▲▲▲
                     if (!isMe)
                       ElevatedButton(
                         onPressed: _toggleFollow,
@@ -318,7 +335,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const Divider(),
 
-              // --- 2. ユーザーの投稿一覧 ---
+              // --- 投稿一覧 ---
               _userPosts.isEmpty
                   ? const Padding(
                       padding: EdgeInsets.all(20.0),
@@ -331,9 +348,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       itemBuilder: (context, index) {
                         final post = _userPosts[index];
                         final isMine = post['isMine'] ?? false;
-                        final likeCount = post['likeCount'] ?? 0;
-                        final commentCount = post['commentCount'] ?? 0;
                         final isLikedByMe = post['isLikedByMe'] ?? false;
+                        final int likeCount = post['likeCount'] ?? 0;
+                        final bool isCopiedByMe = post['isCopiedByMe'] ?? false;
+                        final int copyCount = post['copyCount'] ?? 0;
 
                         return Card(
                           margin: const EdgeInsets.symmetric(
@@ -357,16 +375,57 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       ),
                                     ),
                                     if (isMine)
-                                      IconButton(
+                                      PopupMenuButton<String>(
                                         icon: const Icon(
-                                          Icons.delete,
-                                          size: 20,
+                                          Icons.more_horiz,
                                           color: Colors.grey,
                                         ),
-                                        onPressed: () =>
-                                            _deletePost(post['id']),
-                                        constraints: const BoxConstraints(),
-                                        padding: EdgeInsets.zero,
+                                        onSelected: (value) async {
+                                          if (value == 'edit') {
+                                            final result =
+                                                await Navigator.of(
+                                                  context,
+                                                ).push(
+                                                  MaterialPageRoute(
+                                                    builder: (context) =>
+                                                        EditPostScreen(
+                                                          post: post,
+                                                        ),
+                                                  ),
+                                                );
+                                            if (result == true) _fetchProfile();
+                                          } else if (value == 'delete') {
+                                            _deletePost(post['id']);
+                                          }
+                                        },
+                                        itemBuilder: (context) => [
+                                          const PopupMenuItem(
+                                            value: 'edit',
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  Icons.edit,
+                                                  color: Colors.blue,
+                                                ),
+                                                SizedBox(width: 8),
+                                                Text('編集する'),
+                                              ],
+                                            ),
+                                          ),
+                                          const PopupMenuItem(
+                                            value: 'delete',
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  Icons.delete,
+                                                  color: Colors.red,
+                                                ),
+                                                SizedBox(width: 8),
+                                                Text('削除する'),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                   ],
                                 ),
@@ -377,37 +436,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ),
                                 if (post['imageUrl'] != null) ...[
                                   const SizedBox(height: 8),
-                                  Image(
-                                    image: _getImageProvider(post['imageUrl'])!,
-                                    fit: BoxFit.cover,
-                                    height: 150,
-                                    width: double.infinity,
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: PostImage(
+                                      imageUrl: post['imageUrl'],
+                                      fit: BoxFit.cover,
+                                      height: 150,
+                                    ),
                                   ),
                                 ],
                                 const SizedBox(height: 10),
+
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.end,
                                   children: [
                                     InkWell(
-                                      onTap: () {
-                                        Navigator.of(context).pushNamed(
-                                          '/post_detail',
-                                          arguments: post,
-                                        );
-                                      },
+                                      onTap: () =>
+                                          Navigator.of(context).pushNamed(
+                                            '/post_detail',
+                                            arguments: post,
+                                          ),
                                       child: const Text(
                                         '詳細',
                                         style: TextStyle(color: Colors.blue),
                                       ),
                                     ),
                                     const SizedBox(width: 16),
-                                    const Icon(
-                                      Icons.chat_bubble_outline,
-                                      size: 20,
-                                      color: Colors.grey,
+                                    IconButton(
+                                      icon: Icon(
+                                        isCopiedByMe
+                                            ? Icons.lightbulb
+                                            : Icons.lightbulb_outline,
+                                        color: isCopiedByMe
+                                            ? Colors.orange
+                                            : Colors.grey,
+                                      ),
+                                      onPressed: () =>
+                                          _toggleReaction(post['id'], 'COPY'),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
                                     ),
                                     const SizedBox(width: 4),
-                                    Text('$commentCount'),
+                                    Text('$copyCount'),
                                     const SizedBox(width: 16),
                                     IconButton(
                                       icon: Icon(
@@ -419,7 +489,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                             : Colors.grey,
                                       ),
                                       onPressed: () =>
-                                          _toggleLike(post['id'], isLikedByMe),
+                                          _toggleReaction(post['id'], 'LIKE'),
                                       padding: EdgeInsets.zero,
                                       constraints: const BoxConstraints(),
                                     ),

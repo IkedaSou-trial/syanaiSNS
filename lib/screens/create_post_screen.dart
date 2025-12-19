@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/api_service.dart';
@@ -16,9 +17,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _isLoading = false;
 
   final ImagePicker _picker = ImagePicker();
-  File? _imageFile;
+  Uint8List? _imageBytes;
 
-  // ▼▼▼ 追加: カテゴリーの選択肢と初期値 ▼▼▼
   final List<String> _categories = [
     '惣菜',
     '精肉',
@@ -30,32 +30,31 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     'ライフスタイル',
     'ソフト',
     'ハード',
-    '家電',
-    'ペット',
     '後方',
   ];
-  String _selectedCategory = '惣菜'; // 初期値
+  String _selectedCategory = '惣菜';
 
-  // 引数で source (カメラ or ギャラリー) を受け取る
+  // ▼▼▼ 削除: _selectedPostType (選択不要のため) ▼▼▼
+
   Future<void> _pickImage(ImageSource source) async {
     try {
-      final pickedFile = await _picker.pickImage(source: source, maxWidth: 800);
+      final pickedFile = await _picker.pickImage(
+        source: source,
+        maxWidth: 600,
+        imageQuality: 50,
+      );
+
       if (pickedFile != null) {
+        final bytes = await pickedFile.readAsBytes();
         setState(() {
-          _imageFile = File(pickedFile.path);
+          _imageBytes = bytes;
         });
       }
     } catch (e) {
       print('画像選択エラー: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('画像選択に失敗しました: $e')));
-      }
     }
   }
 
-  // 選択肢を表示するメソッド
   void _showImageSourceSelector() {
     showModalBottomSheet(
       context: context,
@@ -68,16 +67,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 leading: const Icon(Icons.camera_alt),
                 title: const Text('カメラで撮影'),
                 onTap: () {
-                  Navigator.pop(context); // シートを閉じる
-                  _pickImage(ImageSource.camera); // カメラを起動
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.camera);
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.photo_library),
                 title: const Text('アルバムから選択'),
                 onTap: () {
-                  Navigator.pop(context); // シートを閉じる
-                  _pickImage(ImageSource.gallery); // ギャラリーを開く
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.gallery);
                 },
               ),
             ],
@@ -88,35 +87,49 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   Future<void> _submitPost() async {
-    if (_contentController.text.isEmpty) {
+    if (_contentController.text.isEmpty && _imageBytes == null) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('投稿内容を入力してください')));
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
-    // ▼▼▼ 修正: カテゴリーをAPIに渡す ▼▼▼
-    final success = await _apiService.createPostWithFile(
-      _contentController.text,
-      imageFile: _imageFile,
-      category: _selectedCategory, // 👈 追加
-    );
+    try {
+      String? base64Image;
+      if (_imageBytes != null) {
+        base64Image = 'data:image/jpeg;base64,${base64Encode(_imageBytes!)}';
+      }
 
-    setState(() {
-      _isLoading = false;
-    });
+      final success = await _apiService.createPost(
+        _contentController.text,
+        base64Image,
+        category: _selectedCategory,
+        // ▼▼▼ 修正: 選択UIを消したので、固定で 'STORE' (店舗) として送ります ▼▼▼
+        // もし 'INDIVIDUAL' (個人) にしたい場合はここを書き換えてください
+        postType: 'STORE',
+      );
 
-    if (success && mounted) {
-      Navigator.of(context).pop(true);
-    } else {
+      if (success && mounted) {
+        Navigator.of(context).pop(true);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('投稿に失敗しました')));
+        }
+      }
+    } catch (e) {
+      print(e);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('投稿に失敗しました')));
+        ).showSnackBar(SnackBar(content: Text('エラー: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
       }
     }
   }
@@ -126,7 +139,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('新規投稿'),
-        backgroundColor: const Color(0xFF1A237E), // ネイビーで統一
+        backgroundColor: const Color(0xFF1A237E),
         foregroundColor: Colors.white,
         actions: [
           TextButton(
@@ -148,7 +161,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // ▼▼▼ 追加: カテゴリー選択ドロップダウン ▼▼▼
+                  // ▼▼▼ 削除: SegmentedButton (個人/店舗の選択ボタン) ▼▼▼
+
+                  // カテゴリー選択
                   Container(
                     margin: const EdgeInsets.only(bottom: 16),
                     padding: const EdgeInsets.symmetric(
@@ -178,9 +193,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           );
                         }).toList(),
                         onChanged: (String? newValue) {
-                          setState(() {
-                            _selectedCategory = newValue!;
-                          });
+                          setState(() => _selectedCategory = newValue!);
                         },
                       ),
                     ),
@@ -198,8 +211,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   ),
                   const SizedBox(height: 16.0),
 
-                  // 画像がない場合、選択肢シートを表示
-                  _imageFile == null
+                  _imageBytes == null
                       ? ElevatedButton.icon(
                           onPressed: _showImageSourceSelector,
                           icon: const Icon(Icons.add_a_photo),
@@ -214,22 +226,30 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             Stack(
                               alignment: Alignment.topRight,
                               children: [
-                                Image.file(
-                                  _imageFile!,
-                                  height: 200,
-                                  width: double.infinity,
-                                  fit: BoxFit.cover,
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.memory(
+                                    _imageBytes!,
+                                    height: 200,
+                                    width: double.infinity,
+                                    fit: BoxFit.cover,
+                                  ),
                                 ),
-                                IconButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      _imageFile = null;
-                                    });
-                                  },
-                                  icon: const Icon(
-                                    Icons.cancel,
-                                    color: Colors.grey,
-                                    size: 30,
+                                Container(
+                                  margin: const EdgeInsets.all(4),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black54,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: IconButton(
+                                    onPressed: () {
+                                      setState(() => _imageBytes = null);
+                                    },
+                                    icon: const Icon(
+                                      Icons.close,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
                                   ),
                                 ),
                               ],

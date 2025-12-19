@@ -66,9 +66,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   Future<void> _saveAndGoHome() async {
     if (_currentUser == null) return;
 
-    // 0個でも保存できるようにするか、警告するかはお好みで。
-    // 今回は「何も見たくない」もあり得るので警告なしで通すか、
-    // あるいは以前通り警告するか。一旦以前のまま警告を入れておきます。
     if (_selectedCategories.isEmpty) {
       ScaffoldMessenger.of(
         context,
@@ -88,12 +85,22 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
 
       if (success) {
         _currentUser!['interestedCategories'] = _selectedCategories;
-        if (Navigator.canPop(context)) {
+
+        // ▼▼▼ 修正: 遷移ロジックの分岐 ▼▼▼
+        // タイムラインから来た場合 ('isEditing' フラグがある場合)
+        if (_currentUser!['isEditing'] == true) {
+          // フラグを消して戻る
+          _currentUser!.remove('isEditing');
           Navigator.pop(context, _currentUser);
-        } else {
-          Navigator.of(
-            context,
-          ).pushReplacementNamed('/home', arguments: _currentUser);
+        }
+        // 新規登録や初回ログインの場合
+        else {
+          // 履歴を全て消去してホーム画面へ (これで「戻る」でログイン画面に行かなくなります)
+          Navigator.of(context).pushNamedAndRemoveUntil(
+            '/home',
+            (route) => false, // 過去の画面履歴をすべて消す
+            arguments: _currentUser,
+          );
         }
       } else {
         ScaffoldMessenger.of(

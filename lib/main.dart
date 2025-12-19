@@ -6,6 +6,8 @@ import 'screens/create_post_screen.dart';
 import 'screens/post_detail_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/category_selection_screen.dart';
+import 'screens/signup_screen.dart';
+import 'screens/search_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -60,6 +62,8 @@ class MyApp extends StatelessWidget {
         '/login': (context) => const LoginScreen(),
         '/create_post': (context) => const CreatePostScreen(),
         '/category_selection': (context) => const CategorySelectionScreen(),
+        '/signup': (context) => const SignupScreen(),
+        '/search': (context) => const SearchScreen(),
       },
       onGenerateRoute: (settings) {
         if (settings.name == '/home') {
@@ -76,9 +80,11 @@ class MyApp extends StatelessWidget {
           );
         }
         if (settings.name == '/post_detail') {
-          final post = settings.arguments as Map<String, dynamic>;
+          // post 引数を渡すのをやめる
           return MaterialPageRoute(
-            builder: (context) => PostDetailScreen(post: post),
+            builder: (context) => const PostDetailScreen(),
+            settings:
+                settings, // 👈 重要: これを渡すことで、詳細画面内で arguments が取得できるようになります
           );
         }
         if (settings.name == '/profile') {

@@ -1,45 +1,44 @@
 import * as express from 'express';
 import prisma from '../lib/prisma';
 import { authenticateJWT, AuthRequest } from '../auth/auth.middleware';
-import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
-// We need mergeParams: true to get the :postId from the parent router
 const likeRouter = express.Router({ mergeParams: true });
 
 /**
  * POST /posts/:postId/like
- * 投稿に「いいね」する (認証必須)
+ * いいねを追加
  */
-likeRouter.post('/', authenticateJWT, async (req: AuthRequest<{ postId: string }>, res) => {
+// ▼▼▼ 修正: AuthRequest<any> ではなく AuthRequest にする ▼▼▼
+likeRouter.post('/', authenticateJWT, async (req: AuthRequest, res) => {
   const { postId } = req.params;
   const userId = req.user?.id;
 
   if (!userId) {
-    return res.status(403).json({ error: '認証情報がありません。' });
+    return res.status(401).json({ error: '認証が必要です' });
   }
 
   try {
-    // Like.create を使って、いいねを作成
-    // schema.prismaの @@unique([userId, postId]) 制約のおかげで、
-    // 既にいいねしていた場合はエラーになる
-    await prisma.like.create({
-      data: {
-        postId: postId,
+    // 既にいいねしているかチェック
+    const existingLike = await prisma.like.findFirst({
+      where: {
+        postId: String(postId),
         userId: userId,
       },
     });
+
+    if (existingLike) {
+      return res.status(409).json({ error: '既にいいねしています' });
+    }
+
+    await prisma.like.create({
+      data: {
+        postId: String(postId),
+        userId: userId,
+      },
+    });
+
     res.status(201).json({ message: 'いいねしました' });
   } catch (error) {
-    if (error instanceof PrismaClientKnownRequestError) {
-      // P2002: Unique constraint failed (既にいいねしている)
-      if (error.code === 'P2002') {
-        return res.status(409).json({ error: '既にいいねしています' });
-      }
-      // P2003: Foreign key constraint failed (投稿が存在しない)
-      if (error.code === 'P2003') {
-        return res.status(404).json({ error: '投稿が見つかりません' });
-      }
-    }
     console.error('Like error:', error);
     res.status(500).json({ error: 'いいねに失敗しました' });
   }
@@ -47,35 +46,39 @@ likeRouter.post('/', authenticateJWT, async (req: AuthRequest<{ postId: string }
 
 /**
  * DELETE /posts/:postId/like
- * 投稿の「いいね」を取り消す (認証必須)
+ * いい上げ解除
  */
-likeRouter.delete('/', authenticateJWT, async (req: AuthRequest<{ postId: string }>, res) => {
+// ▼▼▼ 修正: AuthRequest<any> ではなく AuthRequest にする ▼▼▼
+likeRouter.delete('/', authenticateJWT, async (req: AuthRequest, res) => {
   const { postId } = req.params;
   const userId = req.user?.id;
 
   if (!userId) {
-    return res.status(403).json({ error: '認証情報がありません。' });
+    return res.status(401).json({ error: '認証が必要です' });
   }
 
   try {
-    // ユーザーIDと投稿IDの両方が一致する「いいね」を探して削除する
-    // これにより、他人の「いいね」を削除できないようにする
-    const { count } = await prisma.like.deleteMany({
+    const existingLike = await prisma.like.findFirst({
       where: {
-        postId: postId,
+        postId: String(postId),
         userId: userId,
       },
     });
 
-    if (count === 0) {
-      // 削除対象が見つからなかった (そもそもいいねしていなかった)
+    if (!existingLike) {
       return res.status(404).json({ error: 'いいねが見つかりません' });
     }
 
-    res.status(200).json({ message: 'いいねを取り消しました' });
+    await prisma.like.delete({
+      where: {
+        id: existingLike.id,
+      },
+    });
+
+    res.json({ message: 'いいねを解除しました' });
   } catch (error) {
     console.error('Unlike error:', error);
-    res.status(500).json({ error: 'いいねの取り消しに失敗しました' });
+    res.status(500).json({ error: 'いいね解除に失敗しました' });
   }
 });
 

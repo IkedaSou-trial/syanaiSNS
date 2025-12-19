@@ -23,6 +23,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   DateTime? _startDate;
   DateTime? _endDate;
+  String? _searchTag;
 
   // ▼▼▼ 追加: カテゴリー選択用 ▼▼▼
   final List<String> _categories = [
@@ -118,6 +119,38 @@ class _SearchScreenState extends State<SearchScreen> {
       _searchResults = [];
       _hasSearched = false;
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 引数を受け取る
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args != null && args is Map && args['tag'] != null) {
+      _searchTag = args['tag'];
+      // タグをセットして即検索
+      _keywordController.text = '#$_searchTag'; // 見た目用にセット
+      _doTagSearch(_searchTag!);
+    }
+  }
+
+  // タグ専用検索メソッド
+  Future<void> _doTagSearch(String tag) async {
+    setState(() {
+      _isLoading = true;
+      _hasSearched = true;
+    });
+
+    final results = await _apiService.getPosts(
+      tag: tag, // APIにタグを渡す
+    );
+
+    if (mounted) {
+      setState(() {
+        _searchResults = results;
+        _isLoading = false;
+      });
+    }
   }
 
   @override
