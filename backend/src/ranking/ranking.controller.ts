@@ -72,4 +72,75 @@ rankingRouter.get('/stores/:code/users', authenticateJWT_Optional, async (req, r
   }
 });
 
+rankingRouter.get('/:period', authenticateJWT_Optional, async (req, res) => {
+  const { period } = req.params;
+
+  try {
+    const now = new Date();
+    let startDate = new Date();
+
+    if (period === 'weekly') {
+      startDate.setDate(now.getDate() - 7);
+    } else if (period === 'monthly') {
+      startDate.setMonth(now.getMonth() - 1);
+    } else {
+      startDate.setDate(now.getDate() - 7);
+    }
+
+    const posts = await prisma.post.findMany({
+      where: {
+        createdAt: {
+          gte: startDate,
+        },
+      },
+      include: {
+        author: {
+          select: {
+            username: true,
+            displayName: true,
+            profileImageUrl: true,
+            store: { select: { name: true } }
+          }
+        },
+        _count: {
+          select: {
+            likes: true,
+            mimics: true,
+          }
+        }
+      }
+    });
+
+    // ▼▼▼ 修正箇所： post の後ろに : any をつけました ▼▼▼
+    const ranking = posts.map((post: any) => {
+      // こうすることで、TypeScriptに「postの中身は何が入っていても文句を言うな」と伝えます
+      const score = (post._count.mimics * 2) + post._count.likes;
+      
+      return {
+        id: post.id,
+        content: post.content,
+        imageUrl: post.imageUrl,
+        createdAt: post.createdAt,
+        author: {
+          username: post.author?.username, // ?をつけて安全にアクセス
+          displayName: post.author?.store 
+             ? `${post.author.displayName}＠${post.author.store.name}` 
+             : post.author?.displayName || '不明',
+          profileImageUrl: post.author?.profileImageUrl,
+        },
+        likeCount: post._count.likes,
+        copyCount: post._count.mimics,
+        score: score
+      };
+    });
+
+    ranking.sort((a, b) => b.score - a.score);
+
+    res.json(ranking.slice(0, 20));
+
+  } catch (error) {
+    console.error('Post ranking error:', error);
+    res.status(500).json({ error: '投稿ランキングの取得に失敗しました' });
+  }
+});
 export default rankingRouter;

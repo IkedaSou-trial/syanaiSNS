@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // 👈 数字のみ制限のために必要
+import 'package:flutter/services.dart';
 import '../services/api_service.dart';
 import '../widgets/store_selection_modal.dart';
 
@@ -13,7 +13,6 @@ class SignupScreen extends StatefulWidget {
 class _SignupScreenState extends State<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  // コントローラー名は変えなくても動きますが、中身は「社員番号」になります
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _displayNameController = TextEditingController();
@@ -28,7 +27,6 @@ class _SignupScreenState extends State<SignupScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final args = ModalRoute.of(context)?.settings.arguments;
-    // スキャン機能などから社員番号が渡された場合の処理
     if (args is String && _usernameController.text.isEmpty) {
       _usernameController.text = args;
     }
@@ -56,7 +54,6 @@ class _SignupScreenState extends State<SignupScreen> {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
 
-      // バックエンドには username として社員番号を送ります
       final user = await _apiService.signup(
         _usernameController.text,
         _passwordController.text,
@@ -85,7 +82,18 @@ class _SignupScreenState extends State<SignupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('新規登録')),
+      // ▼▼▼ 修正: AppBarに戻るボタンを追加 ▼▼▼
+      appBar: AppBar(
+        title: const Text('新規登録'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            Navigator.of(context).pop(); // 一つ前の画面（ログイン）に戻る
+          },
+        ),
+      ),
+
+      // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Form(
@@ -93,18 +101,16 @@ class _SignupScreenState extends State<SignupScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ▼▼▼ 修正: 社員番号（数字のみ）の入力欄 ▼▼▼
+              // 社員番号（数字のみ）
               TextFormField(
                 controller: _usernameController,
                 decoration: const InputDecoration(
-                  labelText: '社員番号', // 表示変更
+                  labelText: '社員番号',
                   hintText: '数字のみ入力してください',
                   border: OutlineInputBorder(),
                 ),
-                keyboardType: TextInputType.number, // 数字キーボードを表示
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly, // 数字以外を弾く
-                ],
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return '社員番号を入力してください';
@@ -112,9 +118,9 @@ class _SignupScreenState extends State<SignupScreen> {
                   return null;
                 },
               ),
-
-              // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
               const SizedBox(height: 16),
+
+              // パスワード
               TextFormField(
                 controller: _passwordController,
                 decoration: const InputDecoration(
@@ -134,6 +140,8 @@ class _SignupScreenState extends State<SignupScreen> {
                 },
               ),
               const SizedBox(height: 16),
+
+              // 表示名
               TextFormField(
                 controller: _displayNameController,
                 decoration: const InputDecoration(
@@ -149,6 +157,7 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
               const SizedBox(height: 16),
 
+              // 店舗選択
               GestureDetector(
                 onTap: _showStoreSelector,
                 child: Container(
@@ -182,8 +191,10 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                 ),
               ),
+
+              // 隠しフィールド（Offstageで完全に見えなくしてあります）
               Offstage(
-                offstage: true, // これで完全に姿を消します
+                offstage: true,
                 child: TextFormField(
                   controller: _storeCodeController,
                   validator: (value) {
@@ -194,6 +205,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   },
                 ),
               ),
+
               const SizedBox(height: 24),
 
               ElevatedButton(
