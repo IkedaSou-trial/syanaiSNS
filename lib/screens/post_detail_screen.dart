@@ -24,6 +24,45 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
   }
 
+  // ▼▼▼ 追加: 拡大画像を表示するダイアログ ▼▼▼
+  void _showImageDialog(BuildContext context, String imageUrl) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent, // 背景を透明に
+        insetPadding: EdgeInsets.zero, // 画面いっぱいに表示
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // 背景タップで閉じるための透明な領域
+            GestureDetector(
+              onTap: () => Navigator.of(context).pop(),
+              child: Container(color: Colors.black.withOpacity(0.9)),
+            ),
+            // 拡大縮小できる画像
+            InteractiveViewer(
+              panEnabled: true, // ドラッグ移動
+              boundaryMargin: const EdgeInsets.all(20),
+              minScale: 0.5,
+              maxScale: 4.0, // 4倍まで拡大可能
+              child: Image.network(imageUrl),
+            ),
+            // 閉じるボタン（右上）
+            Positioned(
+              top: 40,
+              right: 20,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
   // リアクション切り替え
   Future<void> _toggleReaction(String type) async {
     if (_post == null) return;
@@ -161,15 +200,22 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               },
             ),
 
-            // 画像
+            // 画像（ここをタップで拡大）
             if (_post!['imageUrl'] != null) ...[
               const SizedBox(height: 16),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: PostImage(
-                  imageUrl: _post!['imageUrl'],
-                  width: double.infinity,
-                  fit: BoxFit.contain,
+              GestureDetector(
+                // ▼▼▼ タップしたら拡大ダイアログを呼び出す ▼▼▼
+                onTap: () => _showImageDialog(context, _post!['imageUrl']),
+                child: Hero(
+                  tag: _post!['id'], // 一覧画面からのスムーズなアニメーション用
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: PostImage(
+                      imageUrl: _post!['imageUrl'],
+                      width: double.infinity,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
                 ),
               ),
             ],

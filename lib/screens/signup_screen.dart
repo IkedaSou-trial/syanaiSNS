@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // 👈 数字のみ制限のために必要
 import '../services/api_service.dart';
-import '../widgets/store_selection_modal.dart'; // 店舗選択用
+import '../widgets/store_selection_modal.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -11,18 +12,28 @@ class SignupScreen extends StatefulWidget {
 
 class _SignupScreenState extends State<SignupScreen> {
   final _formKey = GlobalKey<FormState>();
+
+  // コントローラー名は変えなくても動きますが、中身は「社員番号」になります
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _displayNameController = TextEditingController();
 
-  // 店舗用
   final _storeCodeController = TextEditingController();
   String _selectedStoreName = '';
 
   final ApiService _apiService = ApiService();
   bool _isLoading = false;
 
-  // 店舗選択モーダルを開く
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final args = ModalRoute.of(context)?.settings.arguments;
+    // スキャン機能などから社員番号が渡された場合の処理
+    if (args is String && _usernameController.text.isEmpty) {
+      _usernameController.text = args;
+    }
+  }
+
   void _showStoreSelector() async {
     final result = await showModalBottomSheet(
       context: context,
@@ -45,7 +56,7 @@ class _SignupScreenState extends State<SignupScreen> {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
 
-      // API呼び出し
+      // バックエンドには username として社員番号を送ります
       final user = await _apiService.signup(
         _usernameController.text,
         _passwordController.text,
@@ -56,12 +67,15 @@ class _SignupScreenState extends State<SignupScreen> {
       setState(() => _isLoading = false);
 
       if (user != null && mounted) {
-        // 登録成功 -> ホームへ
-        Navigator.of(context).pushReplacementNamed('/home', arguments: user);
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/category_selection',
+          (route) => false,
+          arguments: user,
+        );
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('登録に失敗しました（IDが既にあるかも？）')),
+            const SnackBar(content: Text('登録に失敗しました（社員番号が既にあるかも？）')),
           );
         }
       }
@@ -79,28 +93,40 @@ class _SignupScreenState extends State<SignupScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // ▼▼▼ 修正: 社員番号（数字のみ）の入力欄 ▼▼▼
               TextFormField(
                 controller: _usernameController,
-                decoration: const InputDecoration(labelText: 'ユーザーID (英数字)'),
+                decoration: const InputDecoration(
+                  labelText: '社員番号', // 表示変更
+                  hintText: '数字のみ入力してください',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number, // 数字キーボードを表示
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly, // 数字以外を弾く
+                ],
                 validator: (value) {
                   if (value == null || value.isEmpty) {
-                    return 'ユーザーIDを入力してください';
+                    return '社員番号を入力してください';
                   }
                   return null;
                 },
               ),
+
+              // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
               const SizedBox(height: 16),
               TextFormField(
                 controller: _passwordController,
-                decoration: const InputDecoration(labelText: 'パスワード (4文字以上)'),
-                // ▼▼▼ 修正: 文字入力用キーボードに変更 ▼▼▼
+                decoration: const InputDecoration(
+                  labelText: 'パスワード (4文字以上)',
+                  border: OutlineInputBorder(),
+                ),
                 keyboardType: TextInputType.visiblePassword,
                 obscureText: true,
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'パスワードを入力してください';
                   }
-                  // ▼▼▼ 修正: 4文字以上ならOK (数字縛りを削除) ▼▼▼
                   if (value.length < 4) {
                     return 'パスワードは4文字以上で入力してください';
                   }
@@ -110,7 +136,10 @@ class _SignupScreenState extends State<SignupScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _displayNameController,
-                decoration: const InputDecoration(labelText: '表示名 (ニックネーム)'),
+                decoration: const InputDecoration(
+                  labelText: '表示名 (ニックネーム)',
+                  border: OutlineInputBorder(),
+                ),
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return '表示名を入力してください';
@@ -120,7 +149,6 @@ class _SignupScreenState extends State<SignupScreen> {
               ),
               const SizedBox(height: 16),
 
-              // 店舗選択ボタン
               GestureDetector(
                 onTap: _showStoreSelector,
                 child: Container(
@@ -154,9 +182,8 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                 ),
               ),
-              // 店舗コードのバリデーション用 (非表示のTextFormFieldを使うテクニック)
-              SizedBox(
-                height: 0,
+              Offstage(
+                offstage: true, // これで完全に姿を消します
                 child: TextFormField(
                   controller: _storeCodeController,
                   validator: (value) {
@@ -171,9 +198,12 @@ class _SignupScreenState extends State<SignupScreen> {
 
               ElevatedButton(
                 onPressed: _isLoading ? null : _signup,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
                 child: _isLoading
                     ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text('登録する'),
+                    : const Text('登録する', style: TextStyle(fontSize: 16)),
               ),
             ],
           ),

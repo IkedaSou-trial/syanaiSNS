@@ -5,8 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class ApiService {
   // ▼▼▼ 変更: static const にして、外部から ApiService.baseUrl で呼べるようにしました ▼▼▼
   // ※ ngrokを再起動した場合は、ここを新しいURLに書き換えてください
-  static const String baseUrl =
-      "https://unferreted-campbell-hypermetaphorical.ngrok-free.dev";
+  static const String baseUrl = "https://toragram-api.onrender.com";
 
   final _storage = const FlutterSecureStorage();
 

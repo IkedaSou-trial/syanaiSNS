@@ -17,7 +17,7 @@ class EditProfileScreen extends StatefulWidget {
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
   final ApiService _apiService = ApiService();
-  final TextEditingController _displayNameController = TextEditingController();
+  late TextEditingController _displayNameController = TextEditingController();
 
   // 店舗用
   final TextEditingController _storeCodeController = TextEditingController();
@@ -34,6 +34,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     // 既存のデータをセット
     _displayNameController.text = widget.currentUser['displayName'] ?? '';
     _storeCodeController.text = widget.currentUser['storeCode'] ?? '';
+
+    String initialName = widget.currentUser['displayName'] ?? '';
+    // 全角「＠」または半角「@」が含まれていたら、それより前の部分だけを使う
+    if (initialName.contains('＠')) {
+      initialName = initialName.split('＠')[0];
+    } else if (initialName.contains('@')) {
+      initialName = initialName.split('@')[0];
+    }
+
+    _displayNameController = TextEditingController(text: initialName);
 
     // 現在の店舗コードから、店舗名を取得して表示するための処理
     _fetchCurrentStoreName();

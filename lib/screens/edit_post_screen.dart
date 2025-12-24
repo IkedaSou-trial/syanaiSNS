@@ -24,12 +24,19 @@ class _EditPostScreenState extends State<EditPostScreen> {
   bool _isLoading = false;
 
   final List<String> _categories = [
-    '売上報告',
-    '接客',
-    '商品管理',
-    '売り場作り',
-    'トラブル対応',
-    'その他',
+    '惣菜',
+    '精肉',
+    '青果',
+    '鮮魚',
+    'グロサリー',
+    'デイリー',
+    '生活',
+    'ライフスタイル',
+    'ソフト',
+    'ハード',
+    '家電',
+    'ペット',
+    '後方',
   ];
 
   @override

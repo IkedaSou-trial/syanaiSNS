@@ -1,17 +1,12 @@
-import { PrismaClient } from '@prisma/client';
-import * as fs from 'fs';       // 👈 修正: * as fs に変更
-import * as path from 'path';   // 👈 修正: * as path に変更
-import { fileURLToPath } from 'url'; // 👈 追加
+// ▼▼▼ import ではなく require を使います ▼▼▼
+const { PrismaClient } = require('@prisma/client');
+const fs = require('fs');
+const path = require('path');
 
 const prisma = new PrismaClient();
 
-// ▼▼▼ __dirname を自分で定義する（エラー回避の呪文） ▼▼▼
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-// ▲▲▲ 追加ここまで ▲▲▲
-
 async function main() {
-  // 1. CSVファイルのパスを指定
+  // CommonJSなら __dirname がそのまま使えます（面倒な変換が不要）
   const csvFilePath = path.join(__dirname, 'stores_rows.csv');
   
   console.log(`📂 CSVファイルを読み込んでいます... Path: ${csvFilePath}`);
@@ -22,14 +17,14 @@ async function main() {
     return;
   }
 
-  // 2. ファイルを読み込む
+  // ファイルを読み込む
   const csvData = fs.readFileSync(csvFilePath, 'utf8');
 
-  // 3. 行ごとに分割する
+  // 行ごとに分割する
   const rows = csvData.split(/\r?\n/);
 
-  // 4. 1行ずつ処理する
   let count = 0;
+  // ヘッダー行を飛ばして処理
   for (const row of rows.slice(1)) {
     if (!row.trim()) continue;
 
