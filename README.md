@@ -124,33 +124,55 @@ erDiagram
 ### 画面遷移図
 ```mermaid
 graph TD
-    %% Nodes
-    Start((Start)) --> Login[Login Screen]
-    Login -->|Auth Success| Home[Home Screen]
+    %% --- 初期起動フロー ---
+    Start((アプリ起動)) --> Login[LoginScreen]
 
-    subgraph Home_UI [Home Screen / Timeline]
-        Tab1[Tab: Recommended]
-        Tab2[Tab: Store]
-        Tab3[Tab: Following]
+    %% --- 認証・登録グループ ---
+    subgraph Auth [認証・登録]
+        %% ログイン後の条件分岐 (_navigateAfterLogin)
+        Login -->|カテゴリー設定済| Main[MainScreen]
+        Login -->|カテゴリー未設定| CategorySel[CategorySelectionScreen]
+        
+        %% 新規登録フロー
+        Login -->|"未登録IDスキャン / 新規登録ボタン"| Signup[SignupScreen]
+        Signup --> CategorySel
+        CategorySel --> Main
     end
 
-    Home --> Tab1
-    Home --> Tab2
-    Home --> Tab3
+    %% --- メインナビゲーション (MainScreen管理) ---
+    subgraph AppShell [メイン機能]
+        Main -->|"Tab 1"| Home[HomeScreen]
+        Main -->|"Tab 2"| Ranking[RankingScreen]
+        Main -->|"Tab 3"| Scanner[ScannerScreen]
+        Main -->|"Tab 4"| MyProfile["ProfileScreen:自分"]
+    end
 
-    %% Actions from Home
-    Home -->|Floating Action Button| Create[Create Post Screen]
-    Home -->|Settings Icon| Profile[Category/Profile Edit]
-    
-    %% Toggle Logic
-    Home -->|Toggle 'My Posts'| Refresh[Re-fetch & Filter List]
-    Refresh -.-> Home
+    %% --- 機能詳細フロー ---
+    subgraph Actions [詳細・アクション]
+        %% 投稿関連
+        Home -->|FAB| Create[CreatePostScreen]
+        Home -->|検索| Search[SearchScreen]
+        Home -->|詳細| PostDetail[PostDetailScreen]
+        Ranking -->|詳細| PostDetail
+        
+        %% 編集・削除
+        PostDetail -->|"編集(自分)"| EditPost[EditPostScreen]
 
-    %% Returns
-    Create -->|Submit / Back| Home
-    Profile -->|Save / Back| Home
+        %% プロフィール・ユーザー関連
+        Home -->|アイコンタップ| UserProfile["ProfileScreen:他ユーザー"]
+        Ranking -->|アイコンタップ| UserProfile
+        
+        %% プロフィール内部のアクション
+        MyProfile -->|編集| EditProfile[EditProfileScreen]
+        MyProfile -->|"フォロー/フォロワー"| UserList[UserListScreen]
+        MyProfile -->|真似した投稿| Copied[CopiedPostsScreen]
+        
+        UserProfile -->|"フォロー/フォロワー"| UserList
+    end
 
-    %% Styles
-    classDef main fill:#f9f,stroke:#333,stroke-width:2px;
-    class Home,Login main;
+    %% --- スタイル定義 ---
+    classDef main fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef auth fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    class Main,Home,Ranking,MyProfile,Scanner main;
+    class Login,Signup,CategorySel auth;
 ```
